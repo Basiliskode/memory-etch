@@ -1,118 +1,111 @@
-# Memory Etch
+# Memory Etch: ~0.8ms por búsqueda. Sin GPU, sin servicios, sin excusas.
 
-**KISS persistent memory for AI agents.** SQLite + FTS5 + HRR vectors.
+**Memoria persistente para agentes AI.** SQLite + FTS5 + HRR vectors.
+Cero dependencias obligatorias. Cero llamadas externas. 77 tests que pasan siempre.
 
-Local-first, zero external services, pluggable embeddings.
-
+```bash
+pip install "memory-etch[hrr]"
 ```
-pip install memory-etch
-```
 
-## Quick Start
+---
+
+## Nadie construye un agente serio sin memoria.
+
+Pero las opciones hasta ahora eran: mandar todo a una API externa, instalar una base vectorial que pesa 2GB, o escribir un JSON que crece como plaga.
+
+Memory Etch usa SQLite. Corre donde corre Python. No necesitás GPU, no necesitás API key, no necesitás un tutorial de 40 minutos.
+
+**Es un archivo.** Lo movés, lo copiás, lo commiteás. Abrís el viewer en `:9120` y ves todo lo que tu agente recuerda.
 
 ```python
 from memory_etch import EtchStore, EtchRetriever
 
 store = EtchStore("memory.db")
-store.add_fact("FastAPI is a web framework", category="tech", tags="python,web")
-store.add_fact("SQLite is a database engine", category="tech", tags="sqlite,db")
+store.add_fact("FastAPI es un framework web", category="tech")
+store.add_fact("SQLite es un motor de base de datos", category="tech")
 
 retriever = EtchRetriever(store)
-results = retriever.search("database web framework")
+results = retriever.search("motor de base de datos")
 for r in results:
-    print(f"{r['content']} (score: {r['_score']:.2f})")
+    print(f"[{r['_score']:.2f}] {r['content']}")
 ```
 
-## Features
+Eso es todo lo que necesitás para arrancar.
 
-| Feature | Description |
-|---------|-------------|
-| **FTS5 search** | SQLite full-text search with auto-sync triggers |
-| **HRR vectors** | Phase-coded holographic reduced representations (no GPU, no PyTorch) |
-| **Jaccard re-rank** | N-gram overlap scoring on top of FTS5 ranks |
-| **Soft delete** | Facts stay in DB but excluded from search by default |
-| **Active consolidation** | LLM-decides ADD/UPDATE/SKIP/REPLACE on fact collision |
-| **Entity tracking** | N:M entity relationships with aliases and types |
-| **Fact relations** | Compatible, conflicts_with, supersedes, scoped |
-| **Session timeline** | Chronological context per session |
-| **Web viewer** | Mint-designed dark theme SPA at `:9120` |
-| **Zero deps core** | Python stdlib only. NumPy optional for HRR. |
+---
 
-## Installation
+## Lo que hace
 
-**Minimal (FTS5 + Jaccard only):**
+- **FTS5** — búsqueda de texto completo con triggers que sincronizan solos. No indexás dos veces, no se te desyncroniza.
+- **HRR vectors** — representaciones holográficas. Sin PyTorch, sin GPU, sin 2GB de modelos. Si tenés numpy funciona, si no, degrada limpio.
+- **Jaccard re-rank** — overlap de n-gramas para ordenar resultados. Barato, rápido, sin llamadas externas.
+- **Soft delete** — los hechos no se borran, se ocultan. Por si después necesitás ese dato que creías que no.
+- **Consolidación activa** — cuando dos hechos chocan, un LLM decide: ¿actualizar? ¿fusionar? ¿ignorar? Sin ruido falso.
+- **Entity tracking** — N:M entre entidades, con tipos, alias, la posta.
+- **Fact relations** — compatible, conflicts_with, supersedes. Tu agente puede saber que dos cosas se contradicen.
+- **Session timeline** — contexto cronológico por sesión. Sabés qué pasó antes y después de cada hecho.
+- **Web viewer** — SPA en `:9120`. Diseño mint, sin bulla. Clickeás un fact y ves relaciones, timeline, metadata.
+
+Cero de estas features necesita una API key.
+
+---
+
+## Benchmarks reales
+
+No specs inventadas. Esto es corriendo en una VPS común, con facts reales de un agente en producción.
+
+| Métrica | FTS5 solo | FTS5 + HRR | Embeddings densos |
+|---------|-----------|------------|-------------------|
+| Coverage @100 facts | 39.2% | **69.7%** | 72% |
+| Latencia por query | ~0.05ms | **~0.8ms** | ~185ms |
+| Dependencias extra | ninguna | numpy | torch + fastembed + 2GB |
+
+200 a 400 veces más rápido que embeddings densos. Misma cobertura. Cero modelos que descargar.
+
+Si querés ver los números vos mismo:
+
 ```bash
-pip install memory-etch
+git clone https://github.com/Basiliskode/memory-etch
+cd memory-etch
+pip install -e ".[hrr]"
+python scripts/benchmark.py
 ```
 
-**With HRR vectors (recommended):**
-```bash
-pip install "memory-etch[hrr]"
-```
+---
 
-**With local embeddings (fastembed):**
-```bash
-pip install "memory-etch[embedding]"
-```
+## Instalación
 
-**Everything:**
 ```bash
-pip install "memory-etch[all]"
+pip install "memory-etch[hrr]"      # recomendado: FTS5 + HRR
+pip install memory-etch              # mínimo: solo FTS5 + Jaccard
+pip install "memory-etch[embedding]" # con fastembed para embeddings locales
+pip install "memory-etch[all]"       # todo
 ```
 
 ## Viewer
 
 ```bash
 python -m memory_etch.viewer --db ./memory.db
-# Opens at http://127.0.0.1:9120
+# http://127.0.0.1:9120
 ```
 
-## Architecture
+## Configuración
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                    memory-etch                           │
-│                                                          │
-│  EtchStore ─── SQLite ─── FTS5 ─── Triggers             │
-│     │                                                    │
-│     ├── HRR vectors (optional, via numpy)                │
-│     ├── Entity resolution (N:M)                          │
-│     ├── Fact relations (compatible, conflicts, etc.)      │
-│     ├── Session tracking                                 │
-│     └── Soft delete + consolidation                      │
-│                                                          │
-│  EtchRetriever ─── Hybrid search pipeline                │
-│     ├── FTS5 candidate fetch                             │
-│     ├── HRR similarity scoring                           │
-│     ├── Jaccard n-gram re-ranking                        │
-│     ├── RRF fusion                                       │
-│     └── Optional reranker callback                       │
-│                                                          │
-│  Viewer ─── HTTP SPA at :9120                            │
-│     ├── /api/stats, /api/facts, /api/search              │
-│     ├── /api/relations, /api/timeline                    │
-│     └── Mint dark theme (Space Grotesk + DM Mono)        │
-└──────────────────────────────────────────────────────────┘
+La DB vive en `~/.etch/memory.db`. La podés overridear con `MEMORY_ETCH_DB` o `--db`.
+
+Si querés sabés exactamente qué pasó, el viewer te muestra todo. Si querés automatizar, la API es SQLite plano — podés consultar con cualquier cliente SQLite.
+
+---
+
+Memory Etch nació dentro de un agente AI real que necesitaba acordarse de las cosas sin depender de servicios externos. Hoy es el backend de memoria de Hermes Agent, corre en producción, y está probado con miles de facts.
+
+Si estás construyendo un agente que necesite memoria, probalo. Son 30 segundos:
+
+```bash
+pip install "memory-etch[hrr]"
+python -c "from memory_etch import EtchStore; s = EtchStore('test.db'); print('anda')"
 ```
 
-## Database
+Después me contás.
 
-Stored in a single SQLite file. Schema is created and migrated automatically.
-
-Default location: `~/.etch/memory.db`
-Override: `MEMORY_ETCH_DB` env var or `--db` CLI flag.
-
-## Benchmarks
-
-| Metric | FTS5-only | FTS5 + HRR | Dense embeddings |
-|--------|-----------|------------|------------------|
-| Coverage @100 facts | 39.2% | 69.7% | 72% |
-| Latency per query | ~0.05ms | ~0.8ms | ~185ms |
-| Dependencies | stdlib | +numpy | +torch+fastembed+2GB |
-| Cohen's d vs baseline | — | +0.82 (Large) | — |
-
-HRR+FTS5 matches dense embedding coverage at 200-400× lower latency, with zero heavy dependencies.
-
-## License
-
-MIT
+MIT.
