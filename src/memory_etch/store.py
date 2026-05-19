@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS facts (
     updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     hrr_vector      BLOB,
     embedding       BLOB,
+    reinforcement_count INTEGER DEFAULT 0,
+    consolidated    INTEGER DEFAULT 0,
     importance      REAL DEFAULT 0.5,
     session_id      TEXT DEFAULT '',
     topic_key       TEXT DEFAULT '',
@@ -119,6 +121,7 @@ CREATE TABLE IF NOT EXISTS extractions (
     extraction_id   INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id      TEXT DEFAULT '',
     facts_found     INTEGER DEFAULT 0,
+    facts_extracted INTEGER DEFAULT 0,
     facts_added     INTEGER DEFAULT 0,
     dedup_skipped   INTEGER DEFAULT 0,
     model_used      TEXT DEFAULT '',
@@ -131,6 +134,15 @@ CREATE TABLE IF NOT EXISTS turn_buffer (
     session_id  TEXT DEFAULT '',
     role        TEXT DEFAULT '',
     content     TEXT DEFAULT '',
+    meaningful  INTEGER DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS failed_buffers (
+    failed_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  TEXT DEFAULT '',
+    turn_count  INTEGER DEFAULT 0,
+    error       TEXT DEFAULT '',
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -205,6 +217,9 @@ class EtchStore:
             ("topic_key", "TEXT DEFAULT ''"),
             ("revision_count", "INTEGER DEFAULT 0"),
             ("project", "TEXT DEFAULT ''"),
+            ("embedding", "BLOB"),
+            ("reinforcement_count", "INTEGER DEFAULT 0"),
+            ("consolidated", "INTEGER DEFAULT 0"),
             ("importance", "REAL DEFAULT 0.5"),
             ("deleted", "INTEGER DEFAULT 0"),
             ("deleted_reason", "TEXT DEFAULT ''"),
@@ -238,6 +253,33 @@ class EtchStore:
                     role TEXT DEFAULT '',
                     content TEXT DEFAULT '',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
+
+        # turn_buffer: meaningful column
+        if "turn_buffer" in tables:
+            turn_cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(turn_buffer)").fetchall()}
+            if "meaningful" not in turn_cols:
+                logger.info("Migrating schema: adding column meaningful to turn_buffer")
+                self._conn.execute("ALTER TABLE turn_buffer ADD COLUMN meaningful INTEGER DEFAULT 0")
+
+        # extractions: facts_extracted column
+        if "extractions" in tables:
+            ext_cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(extractions)").fetchall()}
+            if "facts_extracted" not in ext_cols:
+                logger.info("Migrating schema: adding column facts_extracted to extractions")
+                self._conn.execute("ALTER TABLE extractions ADD COLUMN facts_extracted INTEGER DEFAULT 0")
+
+        # failed_buffers table
+        if "failed_buffers" not in tables:
+            logger.info("Migrating schema: creating failed_buffers table")
+            self._conn.executescript("""
+                CREATE TABLE IF NOT EXISTS failed_buffers (
+                    failed_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id  TEXT DEFAULT '',
+                    turn_count  INTEGER DEFAULT 0,
+                    error       TEXT DEFAULT '',
+                    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
 
