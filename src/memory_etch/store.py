@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import sqlite3
+import struct
 import threading
 import warnings
 from datetime import datetime, timezone, timedelta
@@ -358,20 +359,56 @@ class EtchStore:
         session_id: str = "",
         topic_key: str = "",
         entities: Optional[list[str]] = None,
+        embedding: Optional[bytes] = None,
     ) -> int:
-        """Insert a new fact. Returns fact_id."""
+        """Insert a new fact. Returns fact_id.
+
+        When tags contain ``topic:<name>``, the topic_key is auto-extracted
+        and an existing fact with the same key is UPDATEd (topic upsert).
+        """
         if trust_score is None:
             trust_score = 0.5
         if importance is None:
             importance = 0.5
 
+        # Auto-extract topic_key from tags if not explicitly provided
+        if not topic_key:
+            m = re.search(r"(?:^|,)topic:([^,]+)", tags)
+            if m:
+                topic_key = "topic:" + m.group(1).strip()
+
         with self._lock:
+            # Topic upsert: if a topic_key is set, try to update existing fact
+            if topic_key:
+                existing = self._conn.execute(
+                    "SELECT fact_id, content, revision_count FROM facts "
+                    "WHERE topic_key = ? AND (deleted IS NULL OR deleted = 0) LIMIT 1",
+                    (topic_key,),
+                ).fetchone()
+                if existing:
+                    eid = existing["fact_id"]
+                    self._conn.execute(
+                        """UPDATE facts SET content = ?, updated_at = CURRENT_TIMESTAMP,
+                           revision_count = revision_count + 1, category = ?, tags = ?,
+                           trust_score = ?, importance = ?, project = ?, session_id = ?,
+                           embedding = COALESCE(?, embedding)
+                        WHERE fact_id = ?""",
+                        (content, category, tags, trust_score, importance,
+                         project, session_id, embedding, eid),
+                    )
+                    self._conn.commit()
+                    self._invalidate_hrr_cache(eid)
+                    if hrr.HAS_NUMPY:
+                        self._pending_hrr.append((eid, content))
+                        self._signal_flush()
+                    return eid
+
             try:
                 self._conn.execute(
                     """INSERT OR IGNORE INTO facts
-                       (content, category, tags, trust_score, importance, project, session_id, topic_key)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (content, category, tags, trust_score, importance, project, session_id, topic_key),
+                       (content, category, tags, trust_score, importance, project, session_id, topic_key, embedding)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (content, category, tags, trust_score, importance, project, session_id, topic_key, embedding),
                 )
                 self._conn.commit()
                 row = self._conn.execute(
@@ -552,6 +589,70 @@ class EtchStore:
             except Exception:
                 return []
 
+    def search_by_vector(
+        self,
+        query_vector: bytes,
+        limit: int = 10,
+        min_trust: float = 0.0,
+        category: str = "",
+        project: str = "",
+    ) -> list[dict]:
+        """Search facts by embedding vector (cosine similarity).
+
+        SQL pre-filter narrows candidates; Python ``struct.unpack`` decodes
+        float32 arrays and computes cosine similarity in a loop.
+
+        Returns list of fact dicts sorted by cosine similarity descending.
+        """
+        with self._lock:
+            conditions = ["(f.deleted IS NULL OR f.deleted = 0)", "f.embedding IS NOT NULL"]
+            params: list = []
+            if min_trust > 0:
+                conditions.append("f.trust_score >= ?")
+                params.append(min_trust)
+            if category:
+                conditions.append("f.category = ?")
+                params.append(category)
+            if project:
+                conditions.append("f.project = ?")
+                params.append(project)
+
+            w = " AND ".join(conditions)
+            rows = self._conn.execute(
+                f"SELECT fact_id, content, embedding, trust_score, category, project "
+                f"FROM facts f WHERE {w}",
+                params,
+            ).fetchall()
+
+        n_floats = len(query_vector) // 4
+        try:
+            q = struct.unpack(f"{n_floats}f", query_vector)
+        except struct.error:
+            return []
+
+        norm_q = sum(a * a for a in q) ** 0.5
+        if norm_q == 0:
+            return []
+
+        scored: list[tuple[float, dict]] = []
+        for r in rows:
+            blob = r["embedding"]
+            if not blob:
+                continue
+            try:
+                v = struct.unpack(f"{len(blob) // 4}f", blob)
+            except struct.error:
+                continue
+            dot = sum(a * b for a, b in zip(q, v))
+            norm_v = sum(b * b for b in v) ** 0.5
+            sim = dot / (norm_q * norm_v) if norm_v > 0 else 0.0
+            d = dict(r)
+            d.pop("embedding", None)
+            scored.append((sim, d))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [d for _, d in scored[:limit]]
+
     def update_fact(self, fact_id: int, **kwargs) -> bool:
         """Update fact fields. Keys can include: content, category, tags, trust_score, importance, project."""
         allowed = {"content", "category", "tags", "trust_score", "importance", "project"}
@@ -592,8 +693,8 @@ class EtchStore:
         project: str = "",
         limit: int = 50,
         offset: int = 0,
-    ) -> dict:
-        """List facts with optional filters."""
+    ) -> list[dict]:
+        """List facts with optional filters. Returns a flat list of fact dicts."""
         with self._lock:
             where = ["(deleted IS NULL OR deleted = 0)"]
             params: list = []
@@ -605,7 +706,6 @@ class EtchStore:
                 params.append(project)
             w = " AND ".join(where)
 
-            total = self._conn.execute(f"SELECT COUNT(*) FROM facts WHERE {w}", params).fetchone()[0]
             rows = self._conn.execute(
                 f"SELECT fact_id, content, category, tags, trust_score, project, "
                 f"created_at, updated_at, topic_key, revision_count, importance, session_id "
@@ -613,7 +713,7 @@ class EtchStore:
                 params + [limit, offset],
             ).fetchall()
 
-        return {"facts": [dict(r) for r in rows], "count": total}
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Entities
@@ -664,9 +764,14 @@ class EtchStore:
 
     def end_session(self, session_id: str, summary: str = "") -> bool:
         with self._lock:
+            # Count facts for this session
+            fact_count = self._conn.execute(
+                "SELECT COUNT(*) FROM facts WHERE session_id = ? AND (deleted IS NULL OR deleted = 0)",
+                (session_id,),
+            ).fetchone()[0]
             c = self._conn.execute(
-                "UPDATE sessions SET status='ended', ended_at=CURRENT_TIMESTAMP, summary=? WHERE session_id=?",
-                (summary, session_id),
+                "UPDATE sessions SET status='ended', ended_at=CURRENT_TIMESTAMP, summary=?, fact_count=? WHERE session_id=?",
+                (summary, fact_count, session_id),
             )
             self._conn.commit()
         return c.rowcount > 0
@@ -701,18 +806,18 @@ class EtchStore:
             except sqlite3.IntegrityError:
                 return False
 
-    def get_relations(self, fact_id: int) -> dict:
+    def get_relations(self, fact_id: int) -> list[dict]:
         with self._lock:
             rows = self._conn.execute(
                 """SELECT r.relation_id,
-                          CASE WHEN r.fact_id_a = ? THEN r.fact_id_b ELSE r.fact_id_a END AS other_fact_id,
-                          r.relation_type, r.confidence, r.judged_by, r.created_at
-                   FROM fact_relations r
-                   WHERE r.fact_id_a = ? OR r.fact_id_b = ?
-                   ORDER BY r.created_at DESC""",
+                              CASE WHEN r.fact_id_a = ? THEN r.fact_id_b ELSE r.fact_id_a END AS other_fact_id,
+                              r.relation_type, r.confidence, r.judged_by, r.created_at
+                       FROM fact_relations r
+                       WHERE r.fact_id_a = ? OR r.fact_id_b = ?
+                       ORDER BY r.created_at DESC""",
                 (fact_id, fact_id, fact_id),
             ).fetchall()
-        return {"relations": [dict(r) for r in rows], "count": len(rows)}
+        return [dict(r) for r in rows]
 
     def get_contradictions(self, limit: int = 10) -> list[dict]:
         with self._lock:
@@ -721,7 +826,7 @@ class EtchStore:
                    FROM fact_relations r
                    JOIN facts a ON a.fact_id = r.fact_id_a
                    JOIN facts b ON b.fact_id = r.fact_id_b
-                   WHERE r.relation_type = 'conflicts_with'
+                   WHERE r.relation_type IN ('conflicts_with', 'supersedes')
                    ORDER BY r.confidence DESC
                    LIMIT ?""",
                 (limit,),
@@ -765,6 +870,184 @@ class EtchStore:
             "before": [dict(r) for r in b4],
             "after": [dict(r) for r in aft],
         }
+
+    # ------------------------------------------------------------------
+    # Backward-compatible API aliases
+    # ------------------------------------------------------------------
+
+    def session_start(self, session_id: str, project: str = "", metadata: Optional[dict] = None) -> dict:
+        """Alias for ``start_session`` — returns enriched dict."""
+        prior = 0
+        if project:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM sessions WHERE project = ?", (project,)
+            ).fetchone()
+            prior = row[0] if row else 0
+        self.start_session(session_id, project, metadata)
+        # Include facts matching project OR global facts (no project)
+        if project:
+            top_rows = self._conn.execute(
+                "SELECT fact_id, content, trust_score FROM facts "
+                "WHERE (deleted IS NULL OR deleted = 0) AND (project = ? OR project = '') "
+                "ORDER BY trust_score DESC LIMIT 5",
+                (project,),
+            ).fetchall()
+        else:
+            top_rows = self._conn.execute(
+                "SELECT fact_id, content, trust_score FROM facts "
+                "WHERE (deleted IS NULL OR deleted = 0) "
+                "ORDER BY trust_score DESC LIMIT 5",
+            ).fetchall()
+        return {
+            "session_id": session_id,
+            "prior_session_count": prior,
+            "top_facts": [dict(r) for r in top_rows],
+        }
+
+    def session_end(self, session_id: str, summary: str = "") -> bool:
+        """Alias for ``end_session``."""
+        return self.end_session(session_id, summary)
+
+    def timeline(self, fact_id: int, before: int = 5, after: int = 5) -> dict:
+        """Alias for ``get_timeline`` with error-raising behavior."""
+        result = self.get_timeline(fact_id, before, after)
+        if not result["fact"]:
+            raise KeyError(f"fact_id {fact_id} not found")
+        if not result["fact"].get("session_id"):
+            raise ValueError("no session association")
+        return result
+
+    def judge_relation(
+        self,
+        fact_id_a: int,
+        fact_id_b: int,
+        relation_type: str = "related",
+        confidence: float = 0.5,
+        judged_by: str = "auto",
+    ) -> dict:
+        """Alias for ``add_relation`` — returns enriched dict.
+
+        If a relation already exists between the two facts, it is UPDATEd
+        and ``updated`` is set to ``True``.
+        """
+        if relation_type not in ("related", "compatible", "scoped", "conflicts_with", "supersedes", "not_conflict"):
+            raise ValueError(f"Invalid relation_type: {relation_type}")
+        # Verify facts exist
+        for fid in (fact_id_a, fact_id_b):
+            row = self._conn.execute(
+                "SELECT 1 FROM facts WHERE fact_id = ?", (fid,)
+            ).fetchone()
+            if not row:
+                raise KeyError(f"fact_id {fid} not found")
+
+        with self._lock:
+            # Check if relation already exists
+            existing = self._conn.execute(
+                "SELECT relation_id FROM fact_relations WHERE fact_id_a = ? AND fact_id_b = ?",
+                (fact_id_a, fact_id_b),
+            ).fetchone()
+
+            if existing:
+                # Update existing
+                self._conn.execute(
+                    """UPDATE fact_relations SET relation_type = ?, confidence = ?, judged_by = ?
+                       WHERE fact_id_a = ? AND fact_id_b = ?""",
+                    (relation_type, confidence, judged_by, fact_id_a, fact_id_b),
+                )
+                self._conn.commit()
+                return {
+                    "relation_type": relation_type,
+                    "confidence": confidence,
+                    "updated": True,
+                    "relation_id": existing["relation_id"],
+                }
+            else:
+                # Insert new
+                self._conn.execute(
+                    """INSERT OR IGNORE INTO fact_relations
+                       (fact_id_a, fact_id_b, relation_type, confidence, judged_by)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (fact_id_a, fact_id_b, relation_type, confidence, judged_by),
+                )
+                self._conn.commit()
+                row = self._conn.execute(
+                    "SELECT relation_id FROM fact_relations WHERE fact_id_a = ? AND fact_id_b = ?",
+                    (fact_id_a, fact_id_b),
+                ).fetchone()
+                return {
+                    "relation_type": relation_type,
+                    "confidence": confidence,
+                    "updated": False,
+                    "relation_id": row["relation_id"] if row else 0,
+                }
+
+    def get_recent_sessions(self, project: str = "", limit: int = 10) -> list[dict]:
+        """Alias for ``list_sessions``."""
+        return self.list_sessions(project, limit)
+
+    def search_facts(
+        self,
+        query: str,
+        limit: int = 10,
+        exclude_deleted: bool = True,
+        project: str = "",
+    ) -> list[dict]:
+        """Alias for ``search``."""
+        return self.search(query, limit=limit, exclude_deleted=exclude_deleted, project=project)
+
+    def search(
+        self,
+        query: str,
+        limit: int = 10,
+        exclude_deleted: bool = True,
+        project: str = "",
+    ) -> list[dict]:
+        """Full-text search via FTS5 with optional project filter."""
+        with self._lock:
+            try:
+                sql = """SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score,
+                                f.created_at, f.updated_at, f.project, f.topic_key, f.revision_count,
+                                f.importance, f.session_id
+                         FROM facts f
+                         JOIN facts_fts fts ON fts.rowid = f.fact_id
+                         WHERE facts_fts MATCH ?"""
+                params: list = [query]
+                conditions: list[str] = []
+                if exclude_deleted:
+                    conditions.append("(f.deleted IS NULL OR f.deleted = 0)")
+                if project:
+                    conditions.append("f.project = ?")
+                    params.append(project)
+                if conditions:
+                    sql += " AND " + " AND ".join(conditions)
+                sql += " ORDER BY fts.rank LIMIT ?"
+                params.append(limit)
+                rows = self._conn.execute(sql, params).fetchall()
+                return [dict(r) for r in rows]
+            except Exception:
+                return []
+
+    def list_sessions(self, project: str = "", limit: int = 10) -> list[dict]:
+        """Get recent ended sessions, newest first."""
+        with self._lock:
+            where = ["status = 'ended'"]
+            params: list = []
+            if project:
+                where.append("project = ?")
+                params.append(project)
+            w = " AND ".join(where)
+            rows = self._conn.execute(
+                f"SELECT session_id, project, summary, fact_count, started_at, ended_at "
+                f"FROM sessions WHERE {w} ORDER BY ended_at DESC, session_id DESC LIMIT ?",
+                params + [limit],
+            ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("summary") and len(d["summary"]) > 200:
+                d["summary"] = d["summary"][:200]
+            result.append(d)
+        return result
 
     # ------------------------------------------------------------------
     # Stats

@@ -34,22 +34,20 @@ class TestStoreBasics:
         store.add_fact("Fact A", category="general")
         store.add_fact("Fact B", category="tech")
         result = store.list_facts()
-        assert result["count"] >= 2
-        assert len(result["facts"]) >= 2
+        assert len(result) >= 2
 
     def test_list_facts_with_category_filter(self, store):
         store.add_fact("Fact A", category="general")
         store.add_fact("Fact B", category="tech")
         result = store.list_facts(category="tech")
-        assert result["count"] == 1
-        assert result["facts"][0]["category"] == "tech"
+        assert len(result) == 1
+        assert result[0]["category"] == "tech"
 
     def test_list_facts_pagination(self, store):
         for i in range(5):
             store.add_fact(f"Fact {i}", category="general")
         result = store.list_facts(limit=3, offset=0)
-        assert len(result["facts"]) == 3
-        assert result["count"] >= 5
+        assert len(result) == 3
 
     def test_update_fact(self, store):
         fid = store.add_fact("Original content", category="general")
@@ -90,7 +88,7 @@ class TestStoreSoftDelete:
         fid = store.add_fact("Will be deleted", category="general")
         store.soft_delete_fact(fid, reason="test cleanup")
         result = store.list_facts()
-        ids = [f["fact_id"] for f in result["facts"]]
+        ids = [f["fact_id"] for f in result]
         assert fid not in ids
 
     def test_soft_delete_can_be_included(self, store):
@@ -114,7 +112,7 @@ class TestStoreSoftDelete:
             fids.append(store.add_fact(f"Fact {i}", category="general"))
         store.soft_delete_fact(fids[1])
         result = store.list_facts()
-        result_ids = [f["fact_id"] for f in result["facts"]]
+        result_ids = [f["fact_id"] for f in result]
         assert fids[1] not in result_ids
 
 
@@ -155,7 +153,7 @@ class TestStoreSessions:
         store.start_session("s1")
         store.add_fact("Fact in session", category="general", session_id="s1")
         result = store.list_facts()
-        fact = next((f for f in result["facts"] if f["session_id"] == "s1"), None)
+        fact = next((f for f in result if f["session_id"] == "s1"), None)
         assert fact is not None
 
 
@@ -166,8 +164,8 @@ class TestStoreRelations:
         store.add_relation(fida, fidb, relation_type="compatible", confidence=0.9)
 
         result = store.get_relations(fida)
-        assert result["count"] >= 1
-        assert any(r["relation_type"] == "compatible" for r in result["relations"])
+        assert len(result) >= 1
+        assert any(r["relation_type"] == "compatible" for r in result)
 
     def test_contradictions(self, store):
         fida = store.add_fact("Fact A", category="general")
