@@ -1,0 +1,3 @@
+name: etch
+display_name: "Memory Etch"
+description: "Local-first persistent memory for AI agents — SQLite + FTS5 + HRR"
