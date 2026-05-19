@@ -1,0 +1,32 @@
+# Bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual envs
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated reports
+*.html
+benchmark_results/
+
+# Distribution
+*.egg-info/
+dist/
+build/
+
+# Env
+.env
+.git-credentials
