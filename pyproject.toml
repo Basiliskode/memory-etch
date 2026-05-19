@@ -25,8 +25,9 @@ classifiers = [
 
 [project.optional-dependencies]
 hrr = ["numpy>=1.24.0"]
-embedding = ["fastembed"]
-all = ["memory-etch[hrr]", "memory-etch[embedding]"]
+embedding = ["fastembed>=0.5.0"]
+bge-m3 = ["fastembed>=0.5.0"]
+all = ["memory-etch[hrr]", "memory-etch[bge-m3]"]
 
 [project.urls]
 "Homepage" = "https://github.com/Basiliskode/memory-etch"

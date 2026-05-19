@@ -109,7 +109,6 @@ class TestTimeline:
                 "UPDATE facts SET created_at = datetime('now', ? || ' minutes') WHERE fact_id = ?",
                 (f"-{count - i}", fid)
             )
-            store._conn.commit()
             ids.append(fid)
         return ids
 
