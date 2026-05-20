@@ -1,0 +1,18 @@
+[run]
+source =
+    src
+omit =
+    */tests/*
+    */.eggs/*
+    */plugins/*
+    */translator/*
+    src/memory_etch/classifier.py
+    src/memory_etch/viewer.py
+
+[report]
+fail_under = 80
+exclude_lines =
+    pragma: no cover
+    def _call_llm_extract
+    if __name__ == .__main__.:
+    raise NotImplementedError
