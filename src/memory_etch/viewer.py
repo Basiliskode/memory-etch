@@ -11,6 +11,7 @@ Usage:
 import argparse
 import http.server
 import json
+import logging
 import os
 import sqlite3
 import sys
@@ -18,6 +19,8 @@ import urllib.parse
 from pathlib import Path
 
 from .store import EtchStore
+
+logger = logging.getLogger(__name__)
 
 # ---- HTML Template (single-file SPA with mint design) ----
 
@@ -644,8 +647,10 @@ class ViewerHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(json.dumps({"error": msg}).encode("utf-8"))
 
     def log_message(self, fmt, *args):
-        import sys
-        sys.stderr.write("[viewer] %s - %s\n" % (self.log_date_time_string(), fmt % args if args else str(fmt)))
+        logger = logging.getLogger(__name__)
+        logger.info(
+            "%s - %s", self.log_date_time_string(), fmt % args if args else str(fmt)
+        )
 
 
 # ---- Server ----
@@ -684,6 +689,11 @@ def create_viewer_server(
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     ap = argparse.ArgumentParser(description="Memory Etch Viewer")
     ap.add_argument("--port", "-p", type=int, default=9120, help="Port (default: 9120)")
     ap.add_argument("--db", "-d", default=None, help="Path to etch memory.db")
@@ -692,20 +702,20 @@ def main():
 
     db_path = args.db or find_db_path()
     if not Path(db_path).exists():
-        print(f"[viewer] ERROR: Database not found at {db_path}", file=sys.stderr)
-        print("[viewer] Specify path with --db or set MEMORY_ETCH_DB env var", file=sys.stderr)
+        logger.error("Database not found at %s", db_path)
+        logger.error("Specify path with --db or set MEMORY_ETCH_DB env var")
         sys.exit(1)
 
     server = create_viewer_server(db_path, args.host, args.port)
 
-    print(f"[viewer] Memory Etch Viewer at http://{args.host}:{args.port}")
-    print(f"[viewer] Database: {db_path}")
-    print("[viewer] Press Ctrl+C to stop")
+    logger.info("Memory Etch Viewer at http://%s:%s", args.host, args.port)
+    logger.info("Database: %s", db_path)
+    logger.info("Press Ctrl+C to stop")
 
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n[viewer] Shutting down...")
+        logger.info("Shutting down...")
     finally:
         server._db.close()
         server.server_close()

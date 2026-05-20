@@ -1,7 +1,10 @@
 """Shared test fixtures for Memory Etch."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from memory_etch import EtchStore, EtchRetriever
+from memory_etch.etch import EtchMemoryProvider
 
 
 @pytest.fixture
@@ -27,3 +30,15 @@ def etch_store_with_facts(etch_store):
 def etch_retriever(etch_store_with_facts):
     """EtchRetriever connected to a pre-populated store."""
     return EtchRetriever(etch_store_with_facts)
+
+
+@pytest.fixture
+def mock_llm_extract():
+    """Mock _call_llm_extract to return 'Extracted: {content}' for E2E tests.
+
+    Patches the class-level method so any EtchMemoryProvider instance
+    calling _call_llm_extract gets the mocked return value.
+    """
+    mock = MagicMock(return_value="Extracted: {content}")
+    with patch.object(EtchMemoryProvider, '_call_llm_extract', mock):
+        yield mock
