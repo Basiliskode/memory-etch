@@ -93,6 +93,14 @@ class EtchMemoryProvider:
     """
 
     def __init__(self, config: Optional[dict] = None) -> None:
+        """Initialize the Hermes-compatible memory provider.
+
+        Args:
+            config: Optional dict overriding default extraction settings.
+                Supported keys: ``auto_extract_llm``, ``extract_interval``,
+                ``extract_min_meaningful``, ``extract_min_buffer``,
+                ``extract_max_batch``, ``db_path``.
+        """
         self.config = {**_DEFAULT_CONFIG, **(config or {})}
         self._store: Optional[EtchStore] = None
         self._session_id: str = ""
@@ -103,7 +111,16 @@ class EtchMemoryProvider:
         self._lock = threading.Lock()
 
     def initialize(self, session_id: str) -> None:
-        """Initialize the provider with a session."""
+        """Initialize the provider with a session.
+
+        Creates or opens the EtchStore and prepares the extractor.
+
+        Args:
+            session_id: Unique session identifier for this provider instance.
+
+        Raises:
+            sqlite3.Error: If the underlying store cannot be initialized.
+        """
         self._session_id = session_id
         db_path = self.config.get("db_path", f"memory_etch_{session_id}.db")
         self._store = EtchStore(db_path=db_path)
@@ -115,7 +132,11 @@ class EtchMemoryProvider:
         )
 
     def shutdown(self) -> None:
-        """Close the provider and flush any pending data."""
+        """Close the provider and flush any pending data.
+
+        Closes the underlying EtchStore and releases database resources.
+        Safe to call multiple times.
+        """
         if self._store:
             self._store.close()
             self._store = None
@@ -303,7 +324,20 @@ class EtchMemoryProvider:
     # ------------------------------------------------------------------
 
     def handle_tool_call(self, tool_name: str, args: dict) -> str:
-        """Handle Hermes tool dispatch for fact_store operations."""
+        """Handle Hermes tool dispatch for fact_store operations.
+
+        Supported actions: ``add``, ``search``, ``feedback``.
+
+        Args:
+            tool_name: Must be ``"fact_store"``.
+            args: Tool arguments dict with ``action`` and action-specific keys.
+
+        Returns:
+            JSON string with the action result.
+
+        Raises:
+            ValueError: If required arguments are missing.
+        """
         if tool_name != "fact_store":
             return json.dumps({"error": f"Unknown tool: {tool_name}"})
 

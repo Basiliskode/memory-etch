@@ -169,7 +169,21 @@ class EtchStore:
         db_path: str,
         hrr_dim: int = 256,
         auto_migrate: bool = True,
-    ):
+    ) -> None:
+        """Initialize the EtchStore.
+
+        Creates or opens the SQLite database, runs schema migrations, and
+        starts the background HRR flush thread when NumPy is available.
+
+        Args:
+            db_path: Path to the SQLite database file.
+            hrr_dim: Dimension for HRR vectors (default: 256).
+            auto_migrate: Whether to run schema creation and migration
+                on initialization (default: True).
+
+        Raises:
+            sqlite3.Error: If the database cannot be opened or created.
+        """
         self._db_path = db_path
         self._hrr_dim = hrr_dim
         self._lock = threading.RLock()
@@ -403,10 +417,28 @@ class EtchStore:
         entities: Optional[list[str]] = None,
         embedding: Optional[bytes] = None,
     ) -> int:
-        """Insert a new fact. Returns fact_id.
+        """Insert a new fact.
 
         When tags contain ``topic:<name>``, the topic_key is auto-extracted
         and an existing fact with the same key is UPDATEd (topic upsert).
+
+        Args:
+            content: Fact text content.
+            category: Fact category (e.g. "general", "project", "user_pref").
+            tags: Comma-separated tags. ``topic:<name>`` triggers topic upsert.
+            trust_score: Initial trust score (default: 0.5).
+            importance: Fact importance (default: 0.5).
+            project: Optional project namespace.
+            session_id: Optional session identifier.
+            topic_key: Optional topic key for upsert behavior.
+            entities: Optional list of entity names to associate.
+            embedding: Optional pre-computed embedding bytes.
+
+        Returns:
+            The ``fact_id`` of the inserted or updated fact.
+
+        Raises:
+            sqlite3.Error: On database-level errors.
         """
         if trust_score is None:
             trust_score = 0.5
@@ -566,7 +598,18 @@ class EtchStore:
         return {"action": "added", "fact_id": fid, "detail": f"action={action} defaulted to ADD"}
 
     def soft_delete_fact(self, fact_id: int, reason: str = "") -> bool:
-        """Soft-delete a fact. It remains in DB but is excluded from searches by default."""
+        """Soft-delete a fact.
+
+        The fact remains in the database but is excluded from searches
+        by default. A deleted reason is recorded for audit.
+
+        Args:
+            fact_id: ID of the fact to soft-delete.
+            reason: Optional reason for deletion.
+
+        Returns:
+            True if a fact was soft-deleted, False if already deleted or not found.
+        """
         with self._lock:
             cur = self._conn.execute(
                 "UPDATE facts SET deleted=1, deleted_reason=? WHERE fact_id=? AND (deleted IS NULL OR deleted=0)",
@@ -696,7 +739,18 @@ class EtchStore:
         return [d for _, d in scored[:limit]]
 
     def update_fact(self, fact_id: int, **kwargs) -> bool:
-        """Update fact fields. Keys can include: content, category, tags, trust_score, importance, project."""
+        """Update fact fields.
+
+        Allowed keys: ``content``, ``category``, ``tags``, ``trust_score``,
+        ``importance``, ``project``.
+
+        Args:
+            fact_id: ID of the fact to update.
+            **kwargs: Field-value pairs to update.
+
+        Returns:
+            True if the fact was updated, False if no valid fields given.
+        """
         allowed = {"content", "category", "tags", "trust_score", "importance", "project"}
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
@@ -711,7 +765,17 @@ class EtchStore:
         return True
 
     def remove_fact(self, fact_id: int) -> bool:
-        """Permanently delete a fact."""
+        """Permanently delete a fact from the database.
+
+        This operation cannot be undone. Consider ``soft_delete_fact``
+        for reversible deletion.
+
+        Args:
+            fact_id: ID of the fact to permanently delete.
+
+        Returns:
+            True if the fact was deleted.
+        """
         with self._lock:
             self._conn.execute("DELETE FROM facts WHERE fact_id=?", (fact_id,))
             self._conn.commit()
@@ -719,7 +783,15 @@ class EtchStore:
         return True
 
     def get_fact(self, fact_id: int) -> Optional[dict]:
-        """Get a single fact by ID."""
+        """Get a single fact by ID.
+
+        Args:
+            fact_id: ID of the fact to retrieve.
+
+        Returns:
+            Fact dict (excluding ``hrr_vector`` and ``embedding`` blobs),
+            or None if not found.
+        """
         with self._lock:
             row = self._conn.execute("SELECT * FROM facts WHERE fact_id=?", (fact_id,)).fetchone()
         if not row:
@@ -780,6 +852,14 @@ class EtchStore:
         return 0
 
     def get_entities(self, fact_id: int) -> list[dict]:
+        """Get entities associated with a fact.
+
+        Args:
+            fact_id: ID of the fact.
+
+        Returns:
+            List of entity dicts with keys ``entity_id``, ``name``, ``entity_type``.
+        """
         with self._lock:
             rows = self._conn.execute(
                 """SELECT e.entity_id, e.name, e.entity_type
@@ -795,6 +875,16 @@ class EtchStore:
     # ------------------------------------------------------------------
 
     def start_session(self, session_id: str, project: str = "", metadata: Optional[dict] = None) -> bool:
+        """Start a new session.
+
+        Args:
+            session_id: Unique session identifier.
+            project: Optional project namespace.
+            metadata: Optional dict stored as JSON.
+
+        Returns:
+            True on success.
+        """
         with self._lock:
             self._conn.execute(
                 """INSERT OR IGNORE INTO sessions (session_id, project, status, metadata)
@@ -805,6 +895,15 @@ class EtchStore:
         return True
 
     def end_session(self, session_id: str, summary: str = "") -> bool:
+        """End an active session.
+
+        Args:
+            session_id: Session to end.
+            summary: Optional summary of the session.
+
+        Returns:
+            True if the session was found and ended, False otherwise.
+        """
         with self._lock:
             # Count facts for this session
             fact_count = self._conn.execute(
@@ -819,6 +918,14 @@ class EtchStore:
         return c.rowcount > 0
 
     def get_session(self, session_id: str) -> Optional[dict]:
+        """Get session details by ID.
+
+        Args:
+            session_id: Session identifier.
+
+        Returns:
+            Session dict with all columns, or None if not found.
+        """
         with self._lock:
             row = self._conn.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
         return dict(row) if row else None
@@ -835,6 +942,19 @@ class EtchStore:
         confidence: float = 0.5,
         judged_by: str = "auto",
     ) -> bool:
+        """Record a relation between two facts.
+
+        Args:
+            fact_id_a: First fact ID.
+            fact_id_b: Second fact ID.
+            relation_type: One of ``related``, ``compatible``, ``scoped``,
+                ``conflicts_with``, ``supersedes``, ``not_conflict``.
+            confidence: Confidence score for the relation (default: 0.5).
+            judged_by: Who or what judged the relation (default: "auto").
+
+        Returns:
+            True if the relation was inserted, False if it already exists.
+        """
         with self._lock:
             try:
                 self._conn.execute(
@@ -849,6 +969,14 @@ class EtchStore:
                 return False
 
     def get_relations(self, fact_id: int) -> list[dict]:
+        """Get all relations for a fact.
+
+        Args:
+            fact_id: Fact ID to look up.
+
+        Returns:
+            List of relation dicts with the other fact as ``other_fact_id``.
+        """
         with self._lock:
             rows = self._conn.execute(
                 """SELECT r.relation_id,
@@ -862,6 +990,14 @@ class EtchStore:
         return [dict(r) for r in rows]
 
     def get_contradictions(self, limit: int = 10) -> list[dict]:
+        """Get known contradictions between facts.
+
+        Args:
+            limit: Max number of contradictions to return (default: 10).
+
+        Returns:
+            List of relation dicts with ``content_a`` and ``content_b``.
+        """
         with self._lock:
             rows = self._conn.execute(
                 """SELECT r.*, a.content as content_a, b.content as content_b
@@ -880,6 +1016,16 @@ class EtchStore:
     # ------------------------------------------------------------------
 
     def get_timeline(self, fact_id: int, before: int = 5, after: int = 5) -> dict:
+        """Get chronological context around a fact.
+
+        Args:
+            fact_id: Anchor fact ID.
+            before: Number of preceding facts to include (default: 5).
+            after: Number of subsequent facts to include (default: 5).
+
+        Returns:
+            Dict with keys ``fact``, ``before``, ``after``.
+        """
         with self._lock:
             anchor = self._conn.execute(
                 "SELECT fact_id, content, session_id FROM facts WHERE fact_id = ?",
@@ -1096,6 +1242,12 @@ class EtchStore:
     # ------------------------------------------------------------------
 
     def stats(self) -> dict:
+        """Get database statistics.
+
+        Returns:
+            Dict with keys ``fact_count``, ``session_count``,
+            ``relation_count``, ``extraction_count``, ``active_sessions``.
+        """
         with self._lock:
             facts = self._conn.execute("SELECT COUNT(*) FROM facts WHERE (deleted IS NULL OR deleted = 0)").fetchone()[0]
             sessions = self._conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
@@ -1117,6 +1269,11 @@ class EtchStore:
         }
 
     def projects(self) -> list[str]:
+        """List distinct project names that have facts.
+
+        Returns:
+            Sorted list of non-empty project names.
+        """
         with self._lock:
             rows = self._conn.execute(
                 "SELECT DISTINCT project FROM facts WHERE project != '' AND (deleted IS NULL OR deleted = 0) ORDER BY project"
@@ -1128,6 +1285,11 @@ class EtchStore:
     # ------------------------------------------------------------------
 
     def close(self) -> None:
+        """Close the store and release resources.
+
+        Stops the HRR flush thread and closes the database connection.
+        Call this when done to avoid resource leaks.
+        """
         self._hrr_flush_stop.set()
         self._signal_flush()
         if self._hrr_flush_thread and self._hrr_flush_thread.is_alive():

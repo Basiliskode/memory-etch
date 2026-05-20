@@ -279,6 +279,14 @@ class EtchRetriever:
         """Search by topic tag or content keyword.
 
         Matches facts where the tag or content contains *topic*.
+
+        Args:
+            topic: Keyword to search for in tags and content.
+            limit: Max results (default: 10).
+            project: Optional project filter.
+
+        Returns:
+            List of fact dicts with a ``_score`` key.
         """
         with self._store._lock:
             conditions: list[str] = ["(f.deleted IS NULL OR f.deleted = 0)"]
@@ -306,6 +314,13 @@ class EtchRetriever:
 
         Searches for facts that share entities with the given topic,
         falling back to FTS5 content match.
+
+        Args:
+            topic: Topic keyword to search related facts for.
+            limit: Max results (default: 10).
+
+        Returns:
+            List of fact dicts related to the topic.
         """
         # First: find entities matching the topic
         with self._store._lock:
@@ -352,7 +367,15 @@ class EtchRetriever:
     def contradict(self, limit: int = 10) -> list[dict]:
         """Find contradictions — known (fact_relations) then algorithmic.
 
-        Returns up to *limit* contradictory fact pairs.
+        First checks existing relations, then falls back to a heuristic
+        scan of facts sharing the same category within a project.
+
+        Args:
+            limit: Max contradiction pairs to return (default: 10).
+
+        Returns:
+            List of contradictory fact pair dicts with ``fact_id_a``,
+            ``content_a``, ``fact_id_b``, ``content_b``, and ``source``.
         """
         # 1. Known contradictions from fact_relations
         known = self._store.get_contradictions(limit)

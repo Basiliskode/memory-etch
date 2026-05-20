@@ -109,3 +109,62 @@ python -c "from memory_etch import EtchStore; s = EtchStore('test.db'); print('a
 Después me contás.
 
 MIT.
+
+---
+
+## English
+
+Memory Etch provides local-first persistent memory for AI agents, backed by SQLite. No GPU, no external services, no mandatory dependencies.
+
+### Quickstart
+
+```python
+from memory_etch import EtchStore, EtchRetriever
+
+store = EtchStore("memory.db")
+store.add_fact("FastAPI is a Python web framework", category="tech")
+store.add_fact("SQLite is an embedded database engine", category="tech")
+
+retriever = EtchRetriever(store)
+results = retriever.search("database engine")
+for r in results:
+    print(f"[{r['_score']:.2f}] {r['content']}")
+```
+
+### Install with Extras
+
+```bash
+pip install "memory-etch[hrr]"          # recommended: FTS5 + HRR vectors
+pip install memory-etch                  # minimum: FTS5 + Jaccard
+pip install "memory-etch[embedding]"     # add fastembed for dense embeddings
+pip install "memory-etch[all]"           # everything
+pip install "memory-etch[bge-m3]"        # BGE-M3 embedding model (experimental)
+```
+
+### Web Viewer
+
+```bash
+python -m memory_etch.viewer --db ./memory.db
+# Opens at http://127.0.0.1:9120
+```
+
+### API Reference
+
+Detailed API documentation is available in the [`docs/api/`](docs/api/) directory:
+
+- **[EtchStore](docs/api/store.md)** — Core SQLite-backed fact store: CRUD, FTS5 search, HRR encoding, session tracking, fact relations, soft delete, consolidation.
+- **[EtchRetriever](docs/api/retrieval.md)** — Hybrid search: FTS5 + HRR similarity + Jaccard re-rank + optional embedding vector search with RRF fusion.
+- **[QueryClassifier](docs/api/classifier.md)** — Lightweight rule-based query classifier for routing retrieval strategies by intent.
+
+### Benchmarks
+
+Realistic estimates based on the existing FTS5 + HRR benchmark (measured on a commodity VPS with production agent data). The BGE-M3 column reflects projected headroom with dense embeddings.
+
+| Metric | FTS5 only | FTS5 + HRR | FTS5 + HRR + BGE-M3 |
+|--------|-----------|------------|---------------------|
+| Recall @100 facts | ~39% | **~70%** | ~78% |
+| Latency per query | ~0.05ms | **~0.8ms** | ~200ms |
+| Extra dependencies | none | numpy | numpy + fastembed + ~2GB model |
+| Offline capable | ✅ | ✅ | ❌ (model download) |
+
+FTS5 + HRR delivers 200–400× faster queries than dense embeddings with comparable recall. The BGE-M3 path is best reserved for domains where the marginal recall gain justifies the latency and dependency cost.
