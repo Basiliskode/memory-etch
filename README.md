@@ -236,6 +236,49 @@ Configuración vía `MEMORY_ETCH_DB_PATH` (default: `memory.db` en el CWD).
 
 ---
 
+## Benchmark
+
+Benchmark integrado para medir recall@k con dataset sintético y juez Gemini:
+
+```bash
+# Requiere GEMINI_API_KEY
+export GEMINI_API_KEY="..."
+
+# Benchmark memory-etch (FTS5 + HRR)
+python -m memory_etch.benchmark --verbose
+
+# Benchmark contra baseline JSON (para comparar)
+python -m memory_etch.benchmark --provider json-baseline --verbose
+
+# Personalizar dataset
+python -m memory_etch.benchmark --n-docs 500 --seed 42 --output results.json
+```
+
+Para benchmarkear OTRO sistema de memoria contra el mismo benchmark,
+implementá ``MemoryProvider``:
+
+```python
+from memory_etch.benchmark import MemoryProvider, BenchmarkRunner
+
+class MyMemory(MemoryProvider):
+    name = "mi-sistema"
+    def ingest(self, documents): ...
+    def retrieve(self, query, k=10, user_id=None): ...
+
+runner = BenchmarkRunner(MyMemory())
+results = runner.run(verbose=True)
+print(f"Accuracy: {results['accuracy']:.1%}")
+```
+
+Resultado de referencia (100 docs, 18 queries):
+
+| Provider | Accuracy | Avg retrieve |
+|---|---|---|
+| memory-etch (FTS5 + HRR) | **94.4%** (17/18) | **5.2ms** |
+| JSON baseline (word overlap) | ~40% | ~0.1ms |
+
+---
+
 ## Web Viewer
 
 ```bash
