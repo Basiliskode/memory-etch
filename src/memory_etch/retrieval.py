@@ -21,6 +21,59 @@ logger = logging.getLogger(__name__)
 # Default HRR weight — 0.3 keeps HRR as a tiebreaker over FTS5
 _DEFAULT_HRR_WEIGHT = 0.3
 _DEFAULT_FTS5_LIMIT_MULTIPLIER = 2
+_DEFAULT_MATCH_THRESHOLD = 3
+_DEFAULT_MAX_DEPTH = 3
+_DEFAULT_FALLBACK_THRESHOLDS = [3, 3]
+
+# Stopwords for keyword extraction in FTS5 expansion.
+# Simple Python list — no external NLP dependency.
+_STOPWORDS = [
+    "the", "a", "is", "what", "does", "have", "any", "do", "are",
+    "was", "were", "can", "will", "would", "could", "may", "this",
+    "that", "with", "for", "to", "in", "on", "at", "by", "of",
+    "and", "or", "not", "be", "has", "had", "it", "its", "an",
+    "as", "from", "which", "who", "whom", "whose", "how", "when",
+    "where", "why",
+]
+_STOPWORD_SET = frozenset(_STOPWORDS)
+
+
+def _extract_keywords(query: str) -> list[str]:
+    """Extract content-bearing keywords from a query by removing stopwords.
+
+    Args:
+        query: Raw search query.
+
+    Returns:
+        List of content keywords (stopwords removed, FTS5-sanitized,
+        deduplicated, preserving original order).
+    """
+    cleaned = _sanitize_fts5(query)
+    tokens = cleaned.split()
+    seen: set[str] = set()
+    keywords: list[str] = []
+    for token in tokens:
+        token_lower = token.lower()
+        if token_lower in _STOPWORD_SET:
+            continue
+        if token_lower not in seen:
+            seen.add(token_lower)
+            keywords.append(token)
+    return keywords
+
+
+def _sanitize_fts5(query: str) -> str:
+    """Sanitize a natural-language query for FTS5 MATCH syntax.
+
+    FTS5 tokenizes by whitespace and punctuation. Special characters like
+    ``?``, ``'``, ``!``, ``.`` etc. cause syntax errors or silently
+    produce no matches. This strips them and returns clean search tokens.
+    """
+    # Remove characters that FTS5 interprets as query operators: ?, ', ", !,
+    # ., ,, -, +, =, ~, `, [, ], {, }, |, ;, :, ^, *, @, #, $, %, &
+    cleaned = re.sub(r"""[?!'".;:\-+=~`@#$%^&*()\[\]{}|,<>]""", " ", query)
+    # Collapse whitespace
+    return " ".join(cleaned.split())
 
 
 class EtchRetriever:
@@ -58,20 +111,38 @@ class EtchRetriever:
         limit: int = 10,
         exclude_deleted: bool = True,
         project: str = "",
+        mode: str = "",
+        fallback_thresholds: Optional[list[int]] = None,
     ) -> list[dict]:
         """Hybrid search: FTS5 + optional HRR + Jaccard + optional vector.
 
-        When ``compute_embedding`` is configured, results are fused via
-        ``_rrf_merge`` between the FTS5 and vector streams.
+        Two modes:
+        - ``mode=""`` (default, empty string): existing behavior — single FTS5
+          query + scoring + optional vector search + RRF fusion.
+        - ``mode="auto"``: smarter fallback cascade —
+          1. ``search_expanded`` (FTS5 expansion with keyword breadth)
+          2. If results < threshold: HRR multi-query (semantic variations)
+          3. If results < threshold: embedding vector search (if configured)
+          4. Results merged at each cascade level
 
         Args:
             query: Search text.
             limit: Max results.
             exclude_deleted: Whether to exclude soft-deleted facts.
             project: Optional project filter.
+            mode: ``"auto"`` for smart fallback cascade; empty string for
+                the existing single-pass hybrid search.
+            fallback_thresholds: Per-level minimum results to stop cascading.
+                Default: ``[3, 3]`` (stop after FTS5 if ≥3, stop after HRR if ≥3).
 
         Returns list of dicts sorted by combined relevance score (``score`` key).
         """
+        if mode == "auto":
+            return self._search_auto(
+                query, limit, exclude_deleted, project, fallback_thresholds,
+            )
+
+        # --- Original behavior (backward compatible) ---
         fts5_stream = self._fts_candidates(query, limit * 2, exclude_deleted, project)
         if not fts5_stream:
             return []
@@ -131,9 +202,10 @@ class EtchRetriever:
                                 f.trust_score, f.hrr_vector, f.created_at, f.updated_at,
                                 f.project
                          FROM facts f
-                         JOIN facts_fts fts ON fts.rowid = f.fact_id
+                            JOIN facts_fts fts ON fts.rowid = f.fact_id
                          WHERE facts_fts MATCH ?"""
-                params: list = [query]
+                safe_query = _sanitize_fts5(query)
+                params: list = [safe_query]
                 conditions: list[str] = []
                 if exclude_deleted:
                     conditions.append("(f.deleted IS NULL OR f.deleted = 0)")
@@ -147,6 +219,10 @@ class EtchRetriever:
 
                 rows = self._store._conn.execute(sql, params).fetchall()
                 results = [dict(r) for r in rows]
+                # Add summary for progressive disclosure
+                for r in results:
+                    if "summary" not in r:
+                        r["summary"] = r.get("content", "")[:200]
                 # Reinforce retrieved facts (retrieval feedback loop)
                 if results:
                     ids = [r["fact_id"] for r in rows]
@@ -186,7 +262,8 @@ class EtchRetriever:
             score = c.get("trust_score", 0.5)  # base trust
 
             # FTS5 rank contribution (normalize to 0-1)
-            fts_rank = getattr(c, "rank", 0) if hasattr(c, "rank") else 0.5
+            # Note: c is a dict, so check key (not attribute) for "rank"
+            fts_rank = c.get("rank", 0.5) if "rank" in c else 0.5
             score += fts_rank * 0.3
 
             # Jaccard n-gram overlap
@@ -213,6 +290,11 @@ class EtchRetriever:
             c["_score"] = score
             c["_hrr_sim"] = hrr_sim
 
+            # Progressive disclosure: add summary field
+            if "summary" not in c:
+                content = c.get("content", "")
+                c["summary"] = content[:200]
+
         return candidates
 
     @staticmethod
@@ -227,26 +309,52 @@ class EtchRetriever:
         return len(a_tokens & b_tokens) / len(a_tokens | b_tokens)
 
     @staticmethod
+    def _compute_rrf_k(num_results: int) -> int:
+        """Compute dynamic RRF k from result count.
+
+        Formula: ``k = max(10, min(100, num_results * 2))``
+
+        This ensures:
+        - Small result sets (≤5) floor at ``k=10`` (more weight on top ranks).
+        - Medium sets get ``k = 2× num_results`` (balanced fusion).
+        - Large sets (≥50) cap at ``k=100`` (avoid fusion dilution).
+
+        Args:
+            num_results: Number of potentially relevant results.
+
+        Returns:
+            RRF k constant.
+        """
+        return max(10, min(100, num_results * 2))
+
+    @staticmethod
     def _rrf_merge(
         stream_a: list[dict],
         stream_b: list[dict],
         limit: int,
         k: int = 60,
+        num_results: Optional[int] = None,
     ) -> list[dict]:
         """Reciprocal Rank Fusion of two ranked streams.
 
         Items appearing in both streams get a boosted rank.
         When one stream is empty, the other is returned with RRF scores applied.
 
+        When ``num_results`` is provided, ``k`` is computed dynamically via
+        ``_compute_rrf_k`` instead of using the static ``k`` parameter.
+
         Args:
             stream_a: First ranked list (must have ``fact_id`` key).
             stream_b: Second ranked list.
             limit: Max items to return.
-            k: RRF constant (default 60).
+            k: RRF constant (default 60). Ignored when ``num_results`` is set.
+            num_results: Optional — compute ``k`` dynamically from result count.
 
         Returns:
             List of merged dicts with a ``score`` key.
         """
+        if num_results is not None:
+            k = EtchRetriever._compute_rrf_k(num_results)
         if not stream_a and not stream_b:
             return []
         if not stream_b:
@@ -287,6 +395,293 @@ class EtchRetriever:
             d["score"] = scores[fid]
             result.append(d)
         return result
+
+    # ------------------------------------------------------------------
+    # Phase 3: Smarter Search — FTS5 expansion, HRR multi-query, cascade
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _merge_dedup_max_score(sets: list[list[dict]]) -> list[dict]:
+        """Merge multiple result sets with dedup by ``fact_id``, keep max score.
+
+        Each result dict is expected to have a ``_score`` key (from
+        ``_score_candidates``). When the same ``fact_id`` appears in multiple
+        sets, the dict with the highest ``_score`` is kept.
+
+        Args:
+            sets: List of scored result lists.
+
+        Returns:
+            Merged list sorted by ``_score`` descending.
+        """
+        best: dict[int, dict] = {}
+        for results in sets:
+            for r in results:
+                fid = r.get("fact_id")
+                if fid is None:
+                    continue
+                existing = best.get(fid)
+                if existing is None or r.get("_score", 0) > existing.get("_score", 0):
+                    best[fid] = r
+        merged = sorted(best.values(), key=lambda x: x.get("_score", 0), reverse=True)
+        return merged
+
+    def search_expanded(
+        self,
+        query: str,
+        limit: int = 10,
+        match_threshold: int = _DEFAULT_MATCH_THRESHOLD,
+        max_depth: int = _DEFAULT_MAX_DEPTH,
+        exclude_deleted: bool = True,
+        project: str = "",
+    ) -> list[dict]:
+        """FTS5 search with progressive query expansion.
+
+        Strategy:
+        1. **Full query** (depth 0): FTS5 MATCH with query as-is.
+        2. **Keywords OR** (depth 1, if < threshold): remove stopwords, OR-join
+           remaining content keywords.
+        3. **Single terms** (depth 2, if < threshold): search each keyword
+           independently, union all results.
+        4. Results from each stage are scored via ``_score_candidates`` and
+           merged with dedup by ID, keeping the max score per document.
+
+        Args:
+            query: Raw search query.
+            limit: Max results.
+            match_threshold: Minimum results to stop expanding (default: 3).
+            max_depth: Number of expansion stages (default: 3).
+            exclude_deleted: Whether to exclude soft-deleted facts.
+            project: Optional project filter.
+
+        Returns:
+            List of scored result dicts, deduplicated.
+        """
+        if not query or not query.strip():
+            return []
+
+        all_sets: list[list[dict]] = []
+
+        # Depth 0: full query as-is
+        depth0 = self._fts_candidates(query, limit * 2, exclude_deleted, project)
+        if depth0:
+            scored0 = self._score_candidates(query, depth0)
+            scored0.sort(key=lambda x: x.get("_score", 0), reverse=True)
+            all_sets.append(scored0)
+
+        # Check if we need expansion
+        current_count = len(self._merge_dedup_max_score(all_sets))
+        if current_count >= match_threshold or max_depth <= 1:
+            merged = self._merge_dedup_max_score(all_sets)
+            # Normalise score key
+            for r in merged:
+                if "_score" in r:
+                    r.setdefault("score", r["_score"])
+            return merged[:limit]
+
+        # Depth 1: OR-joined content keywords
+        keywords = _extract_keywords(query)
+        if keywords:
+            or_query = " OR ".join(keywords)
+            depth1 = self._fts_candidates(or_query, limit * 2, exclude_deleted, project)
+            if depth1:
+                scored1 = self._score_candidates(or_query, depth1)
+                scored1.sort(key=lambda x: x.get("_score", 0), reverse=True)
+                all_sets.append(scored1)
+
+        current_count = len(self._merge_dedup_max_score(all_sets))
+        if current_count >= match_threshold or max_depth <= 2:
+            merged = self._merge_dedup_max_score(all_sets)
+            for r in merged:
+                if "_score" in r:
+                    r.setdefault("score", r["_score"])
+            return merged[:limit]
+
+        # Depth 2: single keyword searches, union
+        if keywords:
+            for kw in keywords:
+                kw_set = self._fts_candidates(kw, limit * 2, exclude_deleted, project)
+                if kw_set:
+                    scored_kw = self._score_candidates(kw, kw_set)
+                    scored_kw.sort(key=lambda x: x.get("_score", 0), reverse=True)
+                    all_sets.append(scored_kw)
+
+        merged = self._merge_dedup_max_score(all_sets)
+        for r in merged:
+            if "_score" in r:
+                r.setdefault("score", r["_score"])
+        return merged[:limit]
+
+    @staticmethod
+    def _generate_query_variations(query: str) -> list[str]:
+        """Generate search query variations for HRR multi-query.
+
+        Produces 2–3 variations:
+        - **Original**: the query as-is.
+        - **Keywords-only**: stopwords removed.
+        - **Bigrams**: adjacent word pairs (only if query has 3+ tokens).
+
+        Args:
+            query: Original search query.
+
+        Returns:
+            List of query variation strings (minimum 2, maximum 3).
+        """
+        variations = [query]
+        keywords = _extract_keywords(query)
+        if keywords and " ".join(keywords) != query:
+            variations.append(" ".join(keywords))
+        tokens = _sanitize_fts5(query).split()
+        if len(tokens) >= 3:
+            bigrams = [" ".join(tokens[i:i + 2]) for i in range(len(tokens) - 1)]
+            if bigrams:
+                variations.append(" ".join(bigrams))
+        return variations
+
+    def _hrr_multi_query(
+        self,
+        query: str,
+        limit: int = 10,
+        exclude_deleted: bool = True,
+        project: str = "",
+    ) -> list[dict]:
+        """Multi-query HRR search with parallel query variations.
+
+        Generates 2–3 query variations (original, keywords-only, bigrams),
+        encodes each via HRR, scores FTS5 candidates for each variation,
+        and merges results (dedup by ID, max score across variations).
+
+        Uses ``ThreadPoolExecutor`` (max_workers=3) to parallelize encoding
+        and scoring. Daemon threads with 1s timeout.
+
+        Args:
+            query: Search query.
+            limit: Max results.
+            exclude_deleted: Whether to exclude soft-deleted facts.
+            project: Optional project filter.
+
+        Returns:
+            Merged list of scored result dicts.
+        """
+        if not query or not query.strip():
+            return []
+
+        variations = self._generate_query_variations(query)
+        if not variations:
+            return []
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _search_variation(var: str) -> list[dict]:
+            candidates = self._fts_candidates(var, limit * 2, exclude_deleted, project)
+            if not candidates:
+                return []
+            scored = self._score_candidates(var, candidates)
+            scored.sort(key=lambda x: x.get("_score", 0), reverse=True)
+            return scored
+
+        all_sets: list[list[dict]] = []
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {executor.submit(_search_variation, var): var for var in variations}
+            try:
+                for future in as_completed(futures, timeout=1.0):
+                    try:
+                        result = future.result()
+                        if result:
+                            all_sets.append(result)
+                    except Exception:
+                        logger.exception("HRR multi-query variation failed")
+            except Exception:
+                logger.exception("HRR multi-query timed out")
+                # Cancel remaining
+                for f in futures:
+                    f.cancel()
+
+        if not all_sets:
+            return []
+
+        merged = self._merge_dedup_max_score(all_sets)
+        for r in merged:
+            if "_score" in r:
+                r.setdefault("score", r["_score"])
+        return merged[:limit]
+
+    def _search_auto(
+        self,
+        query: str,
+        limit: int = 10,
+        exclude_deleted: bool = True,
+        project: str = "",
+        fallback_thresholds: Optional[list[int]] = None,
+    ) -> list[dict]:
+        """RRF-fused search across ALL available streams.
+
+        Collects results from **all** available strategies and merges them
+        via RRF. Unlike the pure cascade approach, this never short-circuits
+        — every active strategy contributes its top results to the ranking.
+
+        Streams (in priority order, all contribute):
+        1. FTS5 expanded (``search_expanded``)
+        2. HRR multi-query (``_hrr_multi_query``)
+        3. Embedding vector search (if configured)
+
+        Args:
+            query: Search query.
+            limit: Max results.
+            exclude_deleted: Whether to exclude soft-deleted facts.
+            project: Optional project filter.
+            fallback_thresholds: Ignored (kept for backward compat).
+                All streams always contribute.
+
+        Returns:
+            List of scored result dicts.
+        """
+        import warnings
+
+        streams: list[list[dict]] = []
+
+        # Stream 1: FTS5 expanded
+        try:
+            level1 = self.search_expanded(
+                query, limit, exclude_deleted=exclude_deleted, project=project,
+            )
+            if level1:
+                streams.append(level1)
+        except Exception as e:
+            warnings.warn(f"FTS5 expanded search failed: {e}")
+
+        # Stream 2: HRR multi-query
+        try:
+            level2 = self._hrr_multi_query(
+                query, limit, exclude_deleted=exclude_deleted, project=project,
+            )
+            if level2:
+                streams.append(level2)
+        except Exception as e:
+            warnings.warn(f"HRR multi-query failed: {e}")
+
+        # Stream 3: Embedding vector search (if configured)
+        if self._compute_embedding is not None:
+            try:
+                q_vec = self._compute_embedding(query)
+                if q_vec:
+                    import struct
+                    vec_bytes = struct.pack(f"{len(q_vec)}f", *q_vec)
+                    embedding_results = self._store.search_by_vector(
+                        vec_bytes, limit=limit, project=project,
+                    )
+                    if embedding_results:
+                        for r in embedding_results:
+                            r["_score"] = r.get("score", 0.5)
+                        streams.append(embedding_results)
+            except Exception:
+                logger.exception("Embedding search in auto-cascade failed")
+
+        merged = self._merge_dedup_max_score(streams)
+        for r in merged:
+            if "_score" in r:
+                r.setdefault("score", r["_score"])
+        return merged[:limit]
 
     def probe(self, topic: str, limit: int = 10, project: str = "") -> list[dict]:
         """Search by topic tag or content keyword.

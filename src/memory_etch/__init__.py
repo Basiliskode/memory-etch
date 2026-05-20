@@ -28,7 +28,9 @@ from .store import EtchStore
 from .retrieval import EtchRetriever
 from .classifier import QueryClassifier
 from .etch import EtchMemoryProvider, _extractor_get_provider_config
+from . import embedding
 from . import hrr
+from .embedding import EmbeddingProvider, NoopProvider
 
 __all__ = [
     "EtchStore",
@@ -36,6 +38,9 @@ __all__ = [
     "EtchMemoryProvider",
     "_extractor_get_provider_config",
     "QueryClassifier",
+    "embedding",
+    "EmbeddingProvider",
+    "NoopProvider",
     "hrr",
 ]
 

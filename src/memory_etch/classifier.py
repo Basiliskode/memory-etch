@@ -8,6 +8,12 @@ entity probe, relation reasoning, or fall back to raw FTS5.
 import re
 from typing import Optional
 
+from .circuit_breaker import LLMCircuitBreaker
+
+
+# Shared module-level circuit breaker for LLM-dependent classification.
+# Rule-based classify() runs regardless; LLM-based fallback checks this.
+_breaker = LLMCircuitBreaker(max_failures=3, cooldown_seconds=60)
 
 # Pattern maps — ordered by specificity (first match wins)
 _INTENT_PATTERNS: list[tuple[str, str, list[str]]] = [

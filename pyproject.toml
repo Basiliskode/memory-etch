@@ -16,19 +16,26 @@ requires-python = ">=3.10,<3.13"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+dependencies = [
+    "datasets>=4.8.5",
+    "google-genai>=2.4.0",
+    "rich>=15.0.0",
+    "typer>=0.25.1",
+]
 
 [project.optional-dependencies]
 hrr = ["numpy>=1.24.0"]
-embedding = ["fastembed>=0.5.0"]
+embedding = ["fastembed>=0.5.0", "httpx>=0.27"]
+embeddings = ["fastembed>=0.5.0", "httpx>=0.27", "numpy>=1.24.0"]
 bge-m3 = ["fastembed>=0.5.0"]
-all = ["memory-etch[hrr]", "memory-etch[bge-m3]"]
+mcp = ["mcp>=1.0.0"]
+all = ["memory-etch[hrr]", "memory-etch[embedding]"]
 
 [project.scripts]
 etch-viewer = "memory_etch.viewer:main"

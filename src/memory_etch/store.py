@@ -12,6 +12,7 @@ This is the core storage layer of Memory Etch. It manages:
 - Active consolidation (LLM-decide on collision)
 """
 
+import hashlib
 import json
 import logging
 import re
@@ -24,8 +25,22 @@ from pathlib import Path
 from typing import Any, Optional, Callable
 
 from . import hrr
+from .embedding import EmbeddingProvider, NoopProvider
+from .project import detect_project
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_fts5(query: str) -> str:
+    """Strip FTS5-unsafe characters from a natural-language query.
+
+    FTS5 treats certain characters as query operators (``?``, ``'``, ``!``,
+    etc.) which cause syntax errors or silently produce no matches when
+    used in ``MATCH`` expressions.  This replacement is lossy — it drops
+    the character — but keeps the rest of the query usable.
+    """
+    cleaned = re.sub(r"""[?!'".;:\-+=~`@#$%^&*()\[\]{}|,<>]""", " ", query)
+    return " ".join(cleaned.split())
 
 # ---------------------------------------------------------------------------
 # Schema
@@ -169,6 +184,8 @@ class EtchStore:
         db_path: str,
         hrr_dim: int = 256,
         auto_migrate: bool = True,
+        embedding_provider: Optional[EmbeddingProvider] = None,
+        project: Optional[str] = None,
     ) -> None:
         """Initialize the EtchStore.
 
@@ -180,6 +197,10 @@ class EtchStore:
             hrr_dim: Dimension for HRR vectors (default: 256).
             auto_migrate: Whether to run schema creation and migration
                 on initialization (default: True).
+            embedding_provider: Optional EmbeddingProvider for semantic
+                search. If None, uses NoopProvider (no-op, no deps).
+            project: Optional project name. ``"auto"`` calls
+                ``detect_project()`` on cwd to auto-detect.
 
         Raises:
             sqlite3.Error: If the database cannot be opened or created.
@@ -187,6 +208,8 @@ class EtchStore:
         self._db_path = db_path
         self._hrr_dim = hrr_dim
         self._lock = threading.RLock()
+        self._embedding_provider = embedding_provider or NoopProvider()
+        self._project = self._resolve_project(project)
 
         # HRR async flush
         self._pending_hrr: list[tuple[int, str]] = []  # (fact_id, content)
@@ -214,6 +237,18 @@ class EtchStore:
             self._migrate_schema()
             self._start_hrr_flush()
 
+    @staticmethod
+    def _resolve_project(project: Optional[str]) -> Optional[str]:
+        """Resolve the ``project`` parameter.
+
+        If ``project`` is the literal string ``"auto"``, calls
+        ``detect_project()`` on the current working directory.
+        Otherwise returns the value as-is.
+        """
+        if project == "auto":
+            return detect_project()
+        return project
+
     # ------------------------------------------------------------------
     # Schema & migrations
     # ------------------------------------------------------------------
@@ -238,6 +273,10 @@ class EtchStore:
             ("deleted", "INTEGER DEFAULT 0"),
             ("deleted_reason", "TEXT DEFAULT ''"),
             ("replaced_by", "INTEGER DEFAULT NULL"),
+            ("what", "TEXT DEFAULT ''"),
+            ("why", "TEXT DEFAULT ''"),
+            ("where_text", "TEXT DEFAULT ''"),
+            ("learned", "TEXT DEFAULT ''"),
         ]:
             if col not in cols:
                 logger.info("Migrating schema: adding column %s", col)
@@ -311,6 +350,34 @@ class EtchStore:
                     UNIQUE(fact_id_a, fact_id_b)
                 );
             """)
+
+        # content_hash and duplicate_count for 60s rolling-window dedup
+        for col, type_def in [
+            ("content_hash", "TEXT DEFAULT ''"),
+            ("duplicate_count", "INTEGER DEFAULT 0"),
+        ]:
+            if col not in cols:
+                logger.info("Migrating schema: adding column %s", col)
+                self._conn.execute(f"ALTER TABLE facts ADD COLUMN {col} {type_def}")
+
+        # Index for O(1) content_hash lookups
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_facts_content_hash "
+            "ON facts(content_hash, project)"
+        )
+
+        # last_retrieved_at for eviction tracking
+        if "last_retrieved_at" not in cols:
+            logger.info("Migrating schema: adding column last_retrieved_at")
+            self._conn.execute(
+                "ALTER TABLE facts ADD COLUMN last_retrieved_at TIMESTAMP"
+            )
+
+        # Index for eviction queries
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_facts_last_retrieved "
+            "ON facts(last_retrieved_at)"
+        )
 
         self._conn.commit()
 
@@ -401,6 +468,92 @@ class EtchStore:
         self._hrr_vector_cache.pop(fact_id, None)
 
     # ------------------------------------------------------------------
+    # Embedding helpers
+    # ------------------------------------------------------------------
+
+    def _maybe_store_embedding(self, fact_id: int, content: str) -> None:
+        """Compute and store an embedding for a fact if the provider is active.
+
+        Skips if the provider is NoopProvider (not configured).
+        If the provider raises, the fact simply has embedding=NULL.
+        """
+        if isinstance(self._embedding_provider, NoopProvider):
+            return
+        try:
+            vec = self._embedding_provider.embed([content])
+            if vec and vec[0]:
+                import struct
+                blob = struct.pack(f"{len(vec[0])}f", *vec[0])
+                self._conn.execute(
+                    "UPDATE facts SET embedding=? WHERE fact_id=?",
+                    (blob, fact_id),
+                )
+                self._conn.commit()
+        except Exception:
+            logger.exception("Embedding computation failed for fact %d", fact_id)
+
+    def _search_by_embedding(self, query_emb: list[float], k: int) -> list[int]:
+        """Search facts by embedding vector similarity (dot product).
+
+        Loads stored BLOBs as float32 ndarray, L2-normalizes, computes
+        dot product with query vector, returns top-k fact IDs.
+
+        Returns empty list if numpy is unavailable or no embeddings exist.
+        """
+        try:
+            import numpy as np  # type: ignore[import-untyped]
+        except ImportError:
+            return []
+
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT fact_id, embedding FROM facts "
+                "WHERE embedding IS NOT NULL AND (deleted IS NULL OR deleted = 0)"
+            ).fetchall()
+
+        if not rows:
+            return []
+
+        n_dim = len(query_emb)
+        embs = []
+        ids = []
+        for r in rows:
+            blob = r["embedding"]
+            if not blob:
+                continue
+            try:
+                vec = np.frombuffer(blob, dtype=np.float32)
+                if len(vec) != n_dim:
+                    continue  # skip mismatched dimensions
+                embs.append(vec)
+                ids.append(r["fact_id"])
+            except Exception:
+                continue
+
+        if not embs:
+            return []
+
+        # Stack into (N, dim) matrix
+        matrix = np.stack(embs, axis=0)
+        # L2-normalize (already normalized for fastembed, but be safe)
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        norms[norms == 0] = 1
+        matrix = matrix / norms
+
+        # Query vector
+        q = np.array(query_emb, dtype=np.float32)
+        q_norm = np.linalg.norm(q)
+        if q_norm > 0:
+            q = q / q_norm
+
+        # Dot product (cosine similarity for unit vectors)
+        scores = matrix @ q
+
+        # Sort by score descending, get top-k
+        top_indices = np.argsort(scores)[::-1][:k]
+        return [ids[i] for i in top_indices]
+
+    # ------------------------------------------------------------------
     # Fact CRUD
     # ------------------------------------------------------------------
 
@@ -416,11 +569,20 @@ class EtchStore:
         topic_key: str = "",
         entities: Optional[list[str]] = None,
         embedding: Optional[bytes] = None,
-    ) -> int:
+        what: Optional[str] = None,
+        why: Optional[str] = None,
+        where_text: Optional[str] = None,
+        learned: Optional[str] = None,
+        return_metadata: bool = False,
+    ) -> int | dict:
         """Insert a new fact.
 
         When tags contain ``topic:<name>``, the topic_key is auto-extracted
         and an existing fact with the same key is UPDATEd (topic upsert).
+
+        Content hash dedup: if the same ``content + project`` is added within
+        a 60-second window, ``duplicate_count`` is incremented and the existing
+        ``fact_id`` is returned (no new row created).
 
         Args:
             content: Fact text content.
@@ -433,9 +595,18 @@ class EtchStore:
             topic_key: Optional topic key for upsert behavior.
             entities: Optional list of entity names to associate.
             embedding: Optional pre-computed embedding bytes.
+            what: Optional structured "what" field.
+            why: Optional structured "why" field.
+            where_text: Optional structured "where" field (``where`` is a
+                SQL reserved word, so we use ``where_text``).
+            learned: Optional structured "learned" field.
+            return_metadata: If True, returns a dict with ``id``, ``status``,
+                and optional ``conflicts_with``. If False (default), returns
+                the ``fact_id`` as an int (backward compat).
 
         Returns:
-            The ``fact_id`` of the inserted or updated fact.
+            The ``fact_id`` (int) by default, or a dict with metadata when
+            ``return_metadata=True``.
 
         Raises:
             sqlite3.Error: On database-level errors.
@@ -445,6 +616,19 @@ class EtchStore:
         if importance is None:
             importance = 0.5
 
+        # SHA-256 content hash for 60s rolling-window dedup
+        content_hash = hashlib.sha256(
+            content.encode() + str(project or "").encode()
+        ).hexdigest()
+
+        # Structured field values.
+        # For INSERT we default to empty string; for UPDATE we pass None
+        # so that COALESCE preserves the existing value.
+        what_val: Optional[str] = what
+        why_val: Optional[str] = why
+        where_val: Optional[str] = where_text
+        learned_val: Optional[str] = learned
+
         # Auto-extract topic_key from tags if not explicitly provided
         if not topic_key:
             m = re.search(r"(?:^|,)topic:([^,]+)", tags)
@@ -452,7 +636,28 @@ class EtchStore:
                 topic_key = "topic:" + m.group(1).strip()
 
         with self._lock:
-            # Topic upsert: if a topic_key is set, try to update existing fact
+            # ---- Content hash dedup (60s rolling window) ----
+            dedup_row = self._conn.execute(
+                """SELECT fact_id, duplicate_count FROM facts
+                   WHERE content_hash = ? AND project IS ?
+                   AND created_at > datetime('now', '-60 seconds')
+                   AND (deleted IS NULL OR deleted = 0)""",
+                (content_hash, project),
+            ).fetchone()
+            if dedup_row:
+                dedup_id = dedup_row["fact_id"]
+                self._conn.execute(
+                    """UPDATE facts SET duplicate_count = duplicate_count + 1,
+                       updated_at = CURRENT_TIMESTAMP WHERE fact_id = ?""",
+                    (dedup_id,),
+                )
+                self._conn.commit()
+                self._invalidate_hrr_cache(dedup_id)
+                if return_metadata:
+                    return {"id": dedup_id, "status": "dedup"}
+                return dedup_id
+
+            # ---- Topic upsert ----
             if topic_key:
                 existing = self._conn.execute(
                     "SELECT fact_id, content, revision_count FROM facts "
@@ -465,24 +670,48 @@ class EtchStore:
                         """UPDATE facts SET content = ?, updated_at = CURRENT_TIMESTAMP,
                            revision_count = revision_count + 1, category = ?, tags = ?,
                            trust_score = ?, importance = ?, project = ?, session_id = ?,
-                           embedding = COALESCE(?, embedding)
+                           embedding = COALESCE(?, embedding),
+                           what = COALESCE(?, what), why = COALESCE(?, why),
+                           where_text = COALESCE(?, where_text),
+                           learned = COALESCE(?, learned),
+                           content_hash = ?
                         WHERE fact_id = ?""",
                         (content, category, tags, trust_score, importance,
-                         project, session_id, embedding, eid),
+                         project, session_id, embedding,
+                         what_val, why_val, where_val, learned_val,
+                         content_hash, eid),
                     )
                     self._conn.commit()
                     self._invalidate_hrr_cache(eid)
                     if hrr.HAS_NUMPY:
                         self._pending_hrr.append((eid, content))
                         self._signal_flush()
+                    # Compute embedding if provider is active (skip if pre-supplied)
+                    if embedding is None:
+                        self._maybe_store_embedding(eid, content)
+                    if return_metadata:
+                        conflicts = self._detect_conflicts(
+                            content=content, fact_id=eid,
+                            project=project, topic_key=topic_key,
+                        )
+                        return {
+                            "id": eid, "status": "updated",
+                            "conflicts_with": conflicts,
+                        }
                     return eid
 
+            # ---- Normal INSERT ----
             try:
                 self._conn.execute(
                     """INSERT OR IGNORE INTO facts
-                       (content, category, tags, trust_score, importance, project, session_id, topic_key, embedding)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (content, category, tags, trust_score, importance, project, session_id, topic_key, embedding),
+                       (content, category, tags, trust_score, importance,
+                        project, session_id, topic_key, embedding,
+                        what, why, where_text, learned, content_hash)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (content, category, tags, trust_score, importance,
+                     project, session_id, topic_key, embedding,
+                     what_val or "", why_val or "", where_val or "",
+                     learned_val or "", content_hash),
                 )
                 self._conn.commit()
                 row = self._conn.execute(
@@ -494,7 +723,10 @@ class EtchStore:
                 row = self._conn.execute(
                     "SELECT fact_id FROM facts WHERE content = ?", (content,)
                 ).fetchone()
-                return row["fact_id"] if row else 0
+                rid = row["fact_id"] if row else 0
+                if return_metadata:
+                    return {"id": rid, "status": "dedup"}
+                return rid
 
             if fact_id and hrr.HAS_NUMPY:
                 self._pending_hrr.append((fact_id, content))
@@ -504,7 +736,97 @@ class EtchStore:
                 for entity_name in entities:
                     self._ensure_entity(fact_id, entity_name)
 
-            return fact_id
+            # Compute embedding if provider is active and not pre-supplied
+            if fact_id and embedding is None:
+                self._maybe_store_embedding(fact_id, content)
+
+        # ---- Conflict surfacing (outside lock) ----
+        if return_metadata and fact_id:
+            conflicts = self._detect_conflicts(
+                content=content,
+                fact_id=fact_id,
+                project=project,
+                topic_key=topic_key,
+            )
+            return {"id": fact_id, "status": "created", "conflicts_with": conflicts}
+
+        return fact_id
+
+    def _detect_conflicts(
+        self,
+        content: str,
+        fact_id: int,
+        project: str,
+        topic_key: str,
+        limit: int = 5,
+    ) -> list[dict]:
+        """Search for existing facts that conflict with a newly added fact.
+
+        Uses FTS5 with an OR-based query (non-trivial content tokens) and
+        topic_key matching to detect conflicts.
+
+        Args:
+            content: The content of the newly added fact.
+            fact_id: The ID of the newly added fact (excluded from results).
+            project: Project namespace to scope the search.
+            topic_key: Topic key of the new fact (for topic-based matching).
+            limit: Max conflict candidates to return.
+
+        Returns:
+            List of dicts with keys ``id``, ``content``, ``score``.
+        """
+        # Build an OR-based FTS5 query from non-trivial content words.
+        # FTS5 default MATCH requires ALL terms (AND), which is too strict
+        # for conflict detection — we want any content overlap.
+        words = content.split()
+        # Filter out very short tokens (likely stop words / noise)
+        sig_words = [w for w in words if len(w) >= 3]
+        if not sig_words:
+            return []
+
+        or_query = " OR ".join(_sanitize_fts5(w) for w in sig_words)
+        if not or_query.strip():
+            return []
+
+        try:
+            params: list[str | int] = [or_query, fact_id]
+            project_filter = "AND f.project IS ?"
+            params.append(project)
+            rows = self._conn.execute(
+                f"""SELECT f.fact_id, f.content, f.topic_key, fts.rank
+                    FROM facts f
+                    JOIN facts_fts fts ON fts.rowid = f.fact_id
+                    WHERE facts_fts MATCH ?
+                    AND f.fact_id != ?
+                    AND (f.deleted IS NULL OR f.deleted = 0)
+                    {project_filter}
+                    ORDER BY fts.rank
+                    LIMIT ?""",
+                params + [limit],
+            ).fetchall()
+
+            conflicts: list[dict] = []
+            for row in rows:
+                # FTS5 rank in SELECT returns -BM25.
+                # rank = 0 → perfect match (all query terms found)
+                # rank < 0 → partial match (some terms matched)
+                rank = row["rank"]
+                # Any non-zero rank means FTS5 detected overlap.
+                is_similar = rank < 0
+                same_topic = (
+                    topic_key and topic_key == row.get("topic_key", "") and topic_key
+                )
+                if is_similar or same_topic:
+                    score = -rank if rank < 0 else 0.0
+                    conflicts.append({
+                        "id": row["fact_id"],
+                        "content": row["content"],
+                        "score": round(score, 4),
+                    })
+            return conflicts
+        except Exception:
+            logger.exception("Conflict detection failed for fact %d", fact_id)
+            return []
 
     def add_fact_with_consolidation(
         self,
@@ -671,6 +993,67 @@ class EtchStore:
             self._conn.commit()
             return {"action": "purged", "count": count}
 
+    def evict_stale(
+        self,
+        min_trust: float = 0.1,
+        max_days: int = 30,
+    ) -> int:
+        """Soft-delete stale facts with low trust and old retrieval age.
+
+        Evicts facts where:
+        - ``trust_score < min_trust`` AND
+        - ``last_retrieved_at`` is more than ``max_days`` ago AND
+        - fact is not already deleted
+
+        Also evicts facts that were never retrieved (``last_retrieved_at IS NULL``)
+        if created more than 7 days ago.
+
+        Args:
+            min_trust: Minimum trust score threshold (default: 0.1).
+            max_days: Maximum days since last retrieval (default: 30).
+
+        Returns:
+            Number of facts soft-deleted.
+        """
+        with self._lock:
+            # Condition 1: retrieved facts that are stale
+            cursor1 = self._conn.execute(
+                """UPDATE facts SET
+                       deleted = 1,
+                       deleted_reason = 'eviction: trust=' || ROUND(trust_score, 3)
+                           || ' last_retrieved=' || COALESCE(last_retrieved_at, 'never'),
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE (deleted IS NULL OR deleted = 0)
+                     AND trust_score < ?
+                     AND last_retrieved_at IS NOT NULL
+                     AND julianday('now') - julianday(last_retrieved_at) > ?""",
+                (min_trust, max_days),
+            )
+            count1 = cursor1.rowcount
+
+            # Condition 2: never-retrieved facts older than 7 days
+            cursor2 = self._conn.execute(
+                """UPDATE facts SET
+                       deleted = 1,
+                       deleted_reason = 'eviction: never retrieved, trust='
+                           || ROUND(trust_score, 3),
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE (deleted IS NULL OR deleted = 0)
+                     AND trust_score < ?
+                     AND last_retrieved_at IS NULL
+                     AND created_at < datetime('now', '-7 days')""",
+                (min_trust,),
+            )
+            count2 = cursor2.rowcount
+
+            self._conn.commit()
+
+        total = count1 + count2
+        if total:
+            logger.info("Evicted %d stale facts (retrieved=%d, never_retrieved=%d)",
+                        total, count1, count2)
+        return total
+
     def _reinforce_facts(self, fact_ids: list[int]) -> None:
         """Boost trust_score and increment retrieval_count for retrieved facts.
 
@@ -715,6 +1098,57 @@ class EtchStore:
                 return [dict(r) for r in rows]
             except Exception:
                 return []
+
+    def search_by_metadata(
+        self,
+        what: Optional[str] = None,
+        why: Optional[str] = None,
+        where_text: Optional[str] = None,
+        learned: Optional[str] = None,
+        limit: int = 10,
+    ) -> list[dict]:
+        """Search facts by structured metadata fields.
+
+        Builds SQL WHERE clauses for each non-None field using
+        ``LIKE '%value%'`` for partial matching. All non-None fields
+        are combined with AND.
+
+        Args:
+            what: Filter by ``what`` field (partial match).
+            why: Filter by ``why`` field (partial match).
+            where_text: Filter by ``where_text`` field (partial match).
+            learned: Filter by ``learned`` field (partial match).
+            limit: Max results (default: 10).
+
+        Returns:
+            List of fact dicts matching all provided filters.
+        """
+        conditions: list[str] = ["(f.deleted IS NULL OR f.deleted = 0)"]
+        params: list = []
+
+        field_map = {
+            "what": what,
+            "why": why,
+            "where_text": where_text,
+            "learned": learned,
+        }
+
+        for col, val in field_map.items():
+            if val is not None:
+                conditions.append(f"f.{col} LIKE ?")
+                params.append(f"%{val}%")
+
+        with self._lock:
+            w = " AND ".join(conditions)
+            rows = self._conn.execute(
+                f"SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score, "
+                f"f.created_at, f.updated_at, f.project, f.topic_key, f.revision_count, "
+                f"f.importance, f.session_id, f.what, f.why, f.where_text, f.learned "
+                f"FROM facts f WHERE {w} ORDER BY f.trust_score DESC LIMIT ?",
+                params + [limit],
+            ).fetchall()
+
+        return [dict(r) for r in rows]
 
     def search_by_vector(
         self,
@@ -849,6 +1283,17 @@ class EtchStore:
         d.pop("embedding", None)
         return d
 
+    def get_fact_full(self, fact_id: int) -> Optional[dict]:
+        """Alias for ``get_fact`` — returns full fact content with all fields.
+
+        Args:
+            fact_id: ID of the fact to retrieve.
+
+        Returns:
+            Full fact dict (excluding large blobs), or None if not found.
+        """
+        return self.get_fact(fact_id)
+
     def list_facts(
         self,
         category: str = "",
@@ -977,6 +1422,59 @@ class EtchStore:
         with self._lock:
             row = self._conn.execute("SELECT * FROM sessions WHERE session_id=?", (session_id,)).fetchone()
         return dict(row) if row else None
+
+    def generate_session_summary(self, session_id: str) -> dict:
+        """Generate a structured summary of a session from its facts.
+
+        Best-effort aggregation: missing sections return empty defaults.
+
+        Args:
+            session_id: The session identifier to summarize.
+
+        Returns:
+            Dict with keys ``goal`` (str), ``discoveries`` (list[str]),
+            ``accomplished`` (list[str]), ``next_steps`` (str).
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT content, category FROM facts "
+                "WHERE session_id = ? AND (deleted IS NULL OR deleted = 0)",
+                (session_id,),
+            ).fetchall()
+
+        goal: str = ""
+        discoveries: list[str] = []
+        accomplished: list[str] = []
+        next_steps: str = ""
+
+        for row in rows:
+            content = row["content"]
+            category = row["category"]
+
+            # All session facts are "accomplished"
+            accomplished.append(content)
+
+            # Goal detection — fact starting with "## Goal"
+            if not goal and content.lstrip().upper().startswith("## GOAL"):
+                goal = content
+
+            # Next steps detection — fact starting with "## Next Steps" or "Next Steps:"
+            if content.lstrip().upper().startswith("## NEXT STEPS"):
+                next_steps = content
+            elif "Next Steps:" in content or "Next steps:" in content:
+                if not next_steps:
+                    next_steps = content
+
+            # Discoveries — facts with category discovery or bugfix
+            if category in ("discovery", "bugfix"):
+                discoveries.append(content)
+
+        return {
+            "goal": goal,
+            "discoveries": discoveries,
+            "accomplished": accomplished,
+            "next_steps": next_steps,
+        }
 
     # ------------------------------------------------------------------
     # Relations
@@ -1231,6 +1729,64 @@ class EtchStore:
         """Alias for ``search``."""
         return self.search(query, limit=limit, exclude_deleted=exclude_deleted, project=project)
 
+    @staticmethod
+    def _rrf_merge(
+        stream_a: list[dict],
+        stream_b: list[dict],
+        limit: int,
+        k: int = 60,
+    ) -> list[dict]:
+        """Reciprocal Rank Fusion of two ranked streams.
+
+        Args:
+            stream_a: First ranked list (must have ``fact_id`` key).
+            stream_b: Second ranked list.
+            limit: Max items to return.
+            k: RRF constant (default 60).
+
+        Returns:
+            List of merged dicts with a ``score`` key.
+        """
+        if not stream_a and not stream_b:
+            return []
+        if not stream_b:
+            result = []
+            for rank, item in enumerate(stream_a):
+                d = dict(item)
+                d["score"] = 1.0 / (k + rank + 1)
+                result.append(d)
+            return result[:limit]
+        if not stream_a:
+            result = []
+            for rank, item in enumerate(stream_b):
+                d = dict(item)
+                d["score"] = 1.0 / (k + rank + 1)
+                result.append(d)
+            return result[:limit]
+
+        scores: dict[int, float] = {}
+        items: dict[int, dict] = {}
+
+        for rank, item in enumerate(stream_a):
+            fid = item.get("fact_id")
+            if fid is not None:
+                scores[fid] = scores.get(fid, 0) + 1.0 / (k + rank + 1)
+                items.setdefault(fid, item)
+
+        for rank, item in enumerate(stream_b):
+            fid = item.get("fact_id")
+            if fid is not None:
+                scores[fid] = scores.get(fid, 0) + 1.0 / (k + rank + 1)
+                items.setdefault(fid, item)
+
+        ranked = sorted(scores.keys(), key=lambda fid: scores[fid], reverse=True)
+        result = []
+        for fid in ranked[:limit]:
+            d = dict(items[fid])
+            d["score"] = scores[fid]
+            result.append(d)
+        return result
+
     def search(
         self,
         query: str,
@@ -1238,16 +1794,30 @@ class EtchStore:
         exclude_deleted: bool = True,
         project: str = "",
     ) -> list[dict]:
-        """Full-text search via FTS5 with optional project filter."""
+        """Hybrid search: FTS5 + optional embedding vector search fused via RRF.
+
+        Always returns FTS5 results. If an embedding provider is configured
+        (non-NoopProvider), the query is embedded and vector search results
+        are fused via Reciprocal Rank Fusion.
+
+        Args:
+            query: Search text.
+            limit: Max results.
+            exclude_deleted: Whether to exclude soft-deleted facts.
+            project: Optional project filter.
+
+        Returns list of dicts sorted by combined relevance score (``score`` key).
+        """
         with self._lock:
             try:
+                safe_query = _sanitize_fts5(query)
                 sql = """SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score,
                                 f.created_at, f.updated_at, f.project, f.topic_key, f.revision_count,
                                 f.importance, f.session_id
                          FROM facts f
                          JOIN facts_fts fts ON fts.rowid = f.fact_id
                          WHERE facts_fts MATCH ?"""
-                params: list = [query]
+                params: list = [safe_query]
                 conditions: list[str] = []
                 if exclude_deleted:
                     conditions.append("(f.deleted IS NULL OR f.deleted = 0)")
@@ -1257,14 +1827,64 @@ class EtchStore:
                 if conditions:
                     sql += " AND " + " AND ".join(conditions)
                 sql += " ORDER BY fts.rank LIMIT ?"
-                params.append(limit)
+                params.append(limit * 2)  # fetch extra for RRF headroom
                 rows = self._conn.execute(sql, params).fetchall()
-                results = [dict(r) for r in rows]
-                # Retrieval feedback loop — reinforce returned facts
-                self._reinforce_facts([r["fact_id"] for r in rows])
-                return results
+                fts_results = [dict(r) for r in rows]
             except Exception:
-                return []
+                fts_results = []
+
+            # Vector stream via embedding (optional)
+            emb_results: list[dict] = []
+            if not isinstance(self._embedding_provider, NoopProvider):
+                try:
+                    q_vec = self._embedding_provider.embed_query(query)
+                    top_ids = self._search_by_embedding(q_vec, k=limit * 2)
+                    if top_ids:
+                            placeholders = ",".join("?" for _ in top_ids)
+                            with self._lock:
+                                rows = self._conn.execute(
+                                    f"""SELECT fact_id, content, category, tags,
+                                               trust_score, created_at, updated_at,
+                                               project, topic_key, revision_count,
+                                               importance, session_id
+                                        FROM facts
+                                        WHERE fact_id IN ({placeholders})
+                                        AND (deleted IS NULL OR deleted = 0)""",
+                                    top_ids,
+                                ).fetchall()
+                                # Re-sort by the embedding rank order
+                                id_order = {fid: i for i, fid in enumerate(top_ids)}
+                                sorted_rows = sorted(
+                                    rows, key=lambda r: id_order.get(r["fact_id"], 999)
+                                )
+                                emb_results = [dict(r) for r in sorted_rows]
+                except Exception:
+                    logger.exception("Embedding search failed")
+
+            # RRF merge
+            merged = self._rrf_merge(fts_results, emb_results, limit=limit, k=60)
+
+            # Progressive disclosure: add summary (first 200 chars) to each result
+            for item in merged:
+                if "content" in item and "summary" not in item:
+                    item["summary"] = item["content"][:200]
+
+            # Retrieval feedback loop — reinforce returned facts
+            if merged:
+                self._reinforce_facts([r["fact_id"] for r in merged])
+
+            # Track last_retrieved_at for eviction
+            if merged:
+                fids = [r["fact_id"] for r in merged]
+                placeholders = ",".join("?" for _ in fids)
+                self._conn.execute(
+                    f"UPDATE facts SET last_retrieved_at = CURRENT_TIMESTAMP "
+                    f"WHERE fact_id IN ({placeholders})",
+                    fids,
+                )
+                self._conn.commit()
+
+            return merged
 
     def list_sessions(self, project: str = "", limit: int = 10) -> list[dict]:
         """Get recent ended sessions, newest first."""

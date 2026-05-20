@@ -11,7 +11,13 @@ import logging
 import time
 from typing import Optional
 
+from .circuit_breaker import LLMCircuitBreaker
+
 logger = logging.getLogger(__name__)
+
+# Shared module-level circuit breaker for LLM-dependent operations.
+# When open, curate() will skip LLM-heavy steps and return early.
+_breaker = LLMCircuitBreaker(max_failures=3, cooldown_seconds=60)
 
 _DEFAULT_CONFIG = {
     # Decay
@@ -53,8 +59,21 @@ class EtchCurator:
         """Run a full curation pass.
 
         Operations run in dependency order: decay → archive → prune.
+        If the circuit breaker is open (cooldown), curation is skipped and
+        a minimal stats dict is returned immediately.
+
         Returns a stats dict with counts and timing.
         """
+        if not _breaker.is_available():
+            logger.warning("Circuit breaker open — skipping curation")
+            return {
+                "decayed": 0,
+                "archived": 0,
+                "pruned": 0,
+                "vacuumed": False,
+                "duration_ms": 0,
+                "skipped": True,
+            }
         t0 = time.time()
         stats = {
             "decayed": self.decay_trust(),
