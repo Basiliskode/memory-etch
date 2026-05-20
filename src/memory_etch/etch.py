@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .store import EtchStore
+from .curator import EtchCurator
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ class EtchMemoryProvider:
         """
         self.config = {**_DEFAULT_CONFIG, **(config or {})}
         self._store: Optional[EtchStore] = None
+        self._curator: Optional[EtchCurator] = None
         self._session_id: str = ""
         self._extractor_enabled: bool = False
         self._paused_until: float = 0.0
@@ -128,6 +130,7 @@ class EtchMemoryProvider:
         self._session_id = session_id
         db_path = self.config.get("db_path", f"memory_etch_{session_id}.db")
         self._store = EtchStore(db_path=db_path)
+        self._curator = EtchCurator(self._store)
         self._extractor_enabled = self.config.get("auto_extract_llm", False)
 
         logger.info(
@@ -138,10 +141,15 @@ class EtchMemoryProvider:
     def shutdown(self) -> None:
         """Close the provider and flush any pending data.
 
-        Closes the underlying EtchStore and releases database resources.
+        Runs a lightweight curation pass before closing so the store stays
+        healthy between sessions. Then closes the underlying EtchStore.
         Safe to call multiple times.
         """
         if self._store:
+            try:
+                self._curator.curate()
+            except Exception:
+                logger.exception("Curation during shutdown failed")
             self._store.close()
             self._store = None
         logger.info("EtchMemoryProvider shut down")
