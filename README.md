@@ -1,7 +1,7 @@
-# Memory Etch: ~0.8ms por búsqueda. Sin GPU, sin servicios, sin excusas.
+# Memory Etch
 
-**Memoria persistente para agentes AI.** SQLite + FTS5 + HRR vectors.
-Cero dependencias obligatorias. Cero llamadas externas. 77 tests que pasan siempre.
+**Memoria persistente local-first para agentes AI.** SQLite + FTS5 + HRR vectors + embeddings opcionales.
+Sin servicios externos, sin GPU, sin API keys. ~0.8ms por búsqueda.
 
 ```bash
 pip install "memory-etch[hrr]"
@@ -9,162 +9,319 @@ pip install "memory-etch[hrr]"
 
 ---
 
-## Nadie construye un agente serio sin memoria.
+## Tabla de Contenidos
 
-Pero las opciones hasta ahora eran: mandar todo a una API externa, instalar una base vectorial que pesa 2GB, o escribir un JSON que crece como plaga.
+- [¿Por qué Memory Etch?](#por-qué-memory-etch)
+- [Instalación](#instalación)
+- [Primeros pasos](#primeros-pasos)
+- [Arquitectura](#arquitectura)
+- [Características](#características)
+- [Embedding Providers](#embedding-providers)
+- [MCP Server](#mcp-server)
+- [Web Viewer](#web-viewer)
+- [Benchmarks](#benchmarks)
+- [API](#api)
+- [Contribuir](#contribuir)
+- [Licencia](#licencia)
 
-Memory Etch usa SQLite. Corre donde corre Python. No necesitás GPU, no necesitás API key, no necesitás un tutorial de 40 minutos.
+---
 
-**Es un archivo.** Lo movés, lo copiás, lo commiteás. Abrís el viewer en `:9120` y ves todo lo que tu agente recuerda.
+## ¿Por qué Memory Etch?
 
-```python
-from memory_etch import EtchStore, EtchRetriever
+Los agentes AI necesitan memoria persistente para ser útiles. Pero las opciones existentes implicaban elegir entre:
 
-store = EtchStore("memory.db")
-store.add_fact("FastAPI es un framework web", category="tech")
-store.add_fact("SQLite es un motor de base de datos", category="tech")
+- **Dependencia de APIs externas** (Pinecone, OpenAI embeddings) — tu agente deja de funcionar sin internet.
+- **Infraestructura pesada** (Chroma, Qdrant, AgentMemory con iii-engine) — 2GB+ de descarga, runtimes externos, config compleja.
+- **Archivos JSON artesanales** — crecen como plaga, sin búsqueda, sin estructura.
 
-retriever = EtchRetriever(store)
-results = retriever.search("motor de base de datos")
-for r in results:
-    print(f"[{r['_score']:.2f}] {r['content']}")
+Memory Etch es el punto medio: **SQLite embedded, sin servidores, sin dependencias obligatorias, sin llamadas externas.** Tu información nunca sale de tu máquina.
+
+```
+pip install memory-etch
+python -c "from memory_etch import EtchStore; s = EtchStore('memory.db'); print('anda')"
 ```
 
 Eso es todo lo que necesitás para arrancar.
 
 ---
 
-## Lo que hace
-
-- **FTS5** — búsqueda de texto completo con triggers que sincronizan solos. No indexás dos veces, no se te desyncroniza.
-- **HRR vectors** — representaciones holográficas. Sin PyTorch, sin GPU, sin 2GB de modelos. Si tenés numpy funciona, si no, degrada limpio.
-- **Jaccard re-rank** — overlap de n-gramas para ordenar resultados. Barato, rápido, sin llamadas externas.
-- **Soft delete** — los hechos no se borran, se ocultan. Por si después necesitás ese dato que creías que no.
-- **Consolidación activa** — cuando dos hechos chocan, un LLM decide: ¿actualizar? ¿fusionar? ¿ignorar? Sin ruido falso.
-- **Entity tracking** — N:M entre entidades, con tipos, alias, la posta.
-- **Fact relations** — compatible, conflicts_with, supersedes. Tu agente puede saber que dos cosas se contradicen.
-- **Session timeline** — contexto cronológico por sesión. Sabés qué pasó antes y después de cada hecho.
-- **Web viewer** — SPA en `:9120`. Diseño mint, sin bulla. Clickeás un fact y ves relaciones, timeline, metadata.
-
-Cero de estas features necesita una API key.
-
----
-
-## Benchmarks reales
-
-No specs inventadas. Esto es corriendo en una VPS común, con facts reales de un agente en producción.
-
-| Métrica | FTS5 solo | FTS5 + HRR | Embeddings densos |
-|---------|-----------|------------|-------------------|
-| Coverage @100 facts | 39.2% | **69.7%** | 72% |
-| Latencia por query | ~0.05ms | **~0.8ms** | ~185ms |
-| Dependencias extra | ninguna | numpy | torch + fastembed + 2GB |
-
-200 a 400 veces más rápido que embeddings densos. Misma cobertura. Cero modelos que descargar.
-
-Si querés ver los números vos mismo:
-
-```bash
-git clone https://github.com/Basiliskode/memory-etch
-cd memory-etch
-pip install -e ".[hrr]"
-python scripts/benchmark.py
-```
-
----
-
 ## Instalación
 
 ```bash
-pip install "memory-etch[hrr]"      # recomendado: FTS5 + HRR
-pip install memory-etch              # mínimo: solo FTS5 + Jaccard
-pip install "memory-etch[embedding]" # con fastembed para embeddings locales
-pip install "memory-etch[all]"       # todo
+# Mínimo: FTS5 + Jaccard (solo stdlib de Python)
+pip install memory-etch
+
+# Recomendado: FTS5 + HRR vectors (necesita numpy)
+pip install "memory-etch[hrr]"
+
+# Con embeddings semánticos locales (BGE-small via fastembed)
+pip install "memory-etch[embeddings]"
+
+# Con MCP server (para integrar con agentes vía MCP)
+pip install "memory-etch[mcp]"
+
+# Todo junto
+pip install "memory-etch[all]"
 ```
 
-## Viewer
+**Requisitos:** Python 3.10+ | Sin GPU | Sin CUDA | Sin runtime externo.
+
+---
+
+## Primeros pasos
+
+```python
+from memory_etch import EtchStore, EtchRetriever
+
+# Crear o abrir la base de datos
+store = EtchStore("memory.db")
+
+# Guardar hechos
+store.add_fact("Python es un lenguaje interpretado", category="tech")
+store.add_fact("SQLite soporta FTS5 para búsqueda de texto completo", category="tech")
+store.add_fact("FastAPI está construido sobre Starlette", category="tech")
+
+# Guardar con campos estructurados (v1.0)
+store.add_fact(
+    content="Usar httpx para llamadas HTTP asincrónicas en Python",
+    what="Decisión técnica",
+    why="httpx tiene mejor soporte de async/await que requests",
+    where="src/http_client.py",
+    learned="httpx funciona con anyio y trio, no solo asyncio",
+)
+
+# Buscar
+retriever = EtchRetriever(store)
+results = retriever.search("búsqueda de texto completo")
+for r in results:
+    print(f"[{r['_score']:.2f}] {r['content']}")
+
+# Búsqueda inteligente con fallback automático (v1.0)
+results = retriever.search(
+    "¿cómo hago requests HTTP en Python?",
+    mode="auto",  # FTS5 → HRR multi-query → embeddings (si están configurados)
+    limit=5,
+)
+
+# Detección automática de proyecto (v1.0)
+# Si estás en un repo git, el proyecto se detecta solo del remote origin
+store = EtchStore("project.db", project="auto")
+```
+
+---
+
+## Arquitectura
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Tu Agente AI                       │
+├─────────────────────────────────────────────────────┤
+│         MCP Server (stdio)  │  Python API            │
+├─────────────────────────────────────────────────────┤
+│  EtchRetriever                                        │
+│  ┌─────────┬──────────┬───────────┬──────────────┐   │
+│  │  FTS5   │   HRR    │  Jaccard  │  Embeddings  │   │
+│  │ (exact) │(vectors) │ (n-gram)  │ (semántico)  │   │
+│  └────┴────┴────┴─────┴────┴──────┴──────┴───────┘   │
+│              │           │                            │
+│         Reciprocal Rank Fusion (RRF)                  │
+│              │                                        │
+│  EtchStore — SQLite + FTS5 + triggers automáticos     │
+└─────────────────────────────────────────────────────┘
+```
+
+**Tres capas de búsqueda, sin dependencias externas por defecto:**
+
+| Capa | Qué hace | Costo | Dependencia |
+|---|---|---|---|
+| **FTS5** | Búsqueda exacta por palabras clave | ~0.05ms | stdlib |
+| **HRR** | Similaridad semántica holográfica | ~0.8ms | numpy (opt-in) |
+| **Jaccard** | Re-ranking por n-gramas | incluido en HRR | numpy (opt-in) |
+| **Embeddings** | Búsqueda semántica densa | ~185ms | fastembed (opt-in) |
+
+Por defecto usa solo FTS5 + Jaccard. Con `pip install memory-etch[hrr]` ganás HRR.
+Con `pip install memory-etch[embeddings]` ganás embeddings densos.
+Cada nivel es opcional, aditivo, y retrocompatible.
+
+---
+
+## Características
+
+### Core (v0.x)
+
+| Feature | Descripción |
+|---|---|
+| **FTS5** | Búsqueda de texto completo con triggers auto-sincronizados |
+| **HRR vectors** | Representaciones holográficas sin modelos, sin GPU |
+| **Jaccard re-rank** | Overlap de n-gramas para ordenar resultados |
+| **Soft delete** | Los hechos no se borran, se ocultan |
+| **Consolidación activa** | LLM decide ante hechos duplicados o contradictorios |
+| **Entity tracking** | N:M entre entidades con tipos y alias |
+| **Fact relations** | compatible, conflicts_with, supersedes |
+| **Session timeline** | Contexto cronológico por sesión |
+| **Web viewer** | SPA en puerto :9120 |
+| **Trust scoring** | Puntuación de confianza que se refuerza con retrievals |
+| **Topic upsert** | Hechos que evolucionan: mismo topic_key, se actualizan |
+
+### v1.0
+
+| Feature | Descripción |
+|---|---|
+| **MCP Server** | 6 tools (add, search, get, delete, timeline, similar) vía stdio |
+| **Structured facts** | Campos what/why/where/learned para memorias disciplinadas |
+| **Project detection** | Detecta el proyecto desde git remote automáticamente |
+| **Embedding providers** | Pluggable: NoopProvider, FastembedProvider, OllamaProvider |
+| **Search expanded** | FTS5 con expansión progresiva (full query → OR → single terms) |
+| **HRR multi-query** | Búsqueda paralela con variaciones semánticas de la query |
+| **Dynamic RRF** | k adaptativo según cantidad de resultados |
+| **Fallback chain** | Modo "auto" que cascada FTS5 → HRR → embeddings |
+| **SHA-256 dedup** | Deduplicación exacta con ventana de 60s |
+| **Conflict surfacing** | Detecta hechos similares al insertar y muestra conflictos |
+| **Circuit breaker** | Protege contra fallos en cadena de LLM externos (3 fallos, 60s cooldown) |
+| **Auto-eviction** | Elimina facts stale (trust < 0.1 o 30 días sin retrieve) |
+| **Session summaries** | Genera resúmenes estructurados de sesiones |
+| **Progressive disclosure** | Search devuelve resumen (200 chars), get_fact_full() da el contenido completo |
+
+---
+
+## Embedding Providers
+
+Tres modos de búsqueda semántica, plug and play:
+
+```python
+# 1. Sin embeddings (FTS5 + HRR, cero overhead)
+store = EtchStore("memory.db")  # NoopProvider por defecto
+
+# 2. Con fastembed (local, ONNX, sin API key)
+#    pip install memory-etch[embeddings]
+from memory_etch.embedding import FastembedProvider
+store = EtchStore("memory.db", embedding_provider=FastembedProvider())
+
+# 3. Con Ollama (si ya tenés Ollama corriendo)
+from memory_etch.embedding import OllamaProvider
+store = EtchStore("memory.db", embedding_provider=OllamaProvider(
+    base_url="http://localhost:11434",
+    model="nomic-embed-text",
+))
+```
+
+Cada provider se puede usar en cualquier combinación con el MCP server.
+
+---
+
+## MCP Server
+
+Para integrar memory-etch con cualquier agente que soporte MCP (Claude Code, Codex, Gemini CLI, etc.):
+
+```bash
+pip install "memory-etch[mcp]"
+
+# Con variable de entorno
+set MEMORY_ETCH_DB_PATH=./memory.db
+python -m memory_etch.mcp
+```
+
+**Tools disponibles:**
+
+| Tool | Descripción |
+|---|---|
+| `add_fact` | Guarda un hecho con contenido, proyecto, y metadatos opcionales |
+| `search_facts` | Búsqueda híbrida con FTS5 + HRR + mode="auto" |
+| `get_fact` | Obtiene un hecho completo por ID |
+| `delete_fact` | Soft-delete de un hecho |
+| `get_timeline` | Timeline cronológico de una sesión o proyecto |
+| `similar_facts` | Encuentra hechos similares por contenido |
+
+Configuración vía `MEMORY_ETCH_DB_PATH` (default: `memory.db` en el CWD).
+
+---
+
+## Web Viewer
 
 ```bash
 python -m memory_etch.viewer --db ./memory.db
 # http://127.0.0.1:9120
 ```
 
-## Configuración
-
-La DB vive en `~/.etch/memory.db`. La podés overridear con `MEMORY_ETCH_DB` o `--db`.
-
-Si querés sabés exactamente qué pasó, el viewer te muestra todo. Si querés automatizar, la API es SQLite plano — podés consultar con cualquier cliente SQLite.
+SPA con diseño mint: buscador, timeline, relaciones, metadata por fact.
 
 ---
 
-Memory Etch nació dentro de un agente AI real que necesitaba acordarse de las cosas sin depender de servicios externos. Hoy es el backend de memoria de Hermes Agent, corre en producción, y está probado con miles de facts.
+## Benchmarks
 
-Si estás construyendo un agente que necesite memoria, probalo. Son 30 segundos:
+### Benchmark sintético (100 documentos, 18 queries)
+
+| Modo | Recall | Latencia | Dependencias |
+|---|---|---|---|
+| FTS5 + HRR (search_expanded + re-score) | **94.4%** (17/18) | **5.2ms** | numpy |
+| Solo FTS5 raw | ~5% | ~0.05ms | stdlib |
+| Con embeddings (BGE-small) | ~72% | ~185ms | fastembed + 65MB |
+
+Benchmark reproducible:
 
 ```bash
+set GEMINI_API_KEY=...
 pip install "memory-etch[hrr]"
-python -c "from memory_etch import EtchStore; s = EtchStore('test.db'); print('anda')"
+python scripts/run_amb_benchmark.py --n-docs 100 --verbose
 ```
 
-Después me contás.
+### Benchmarks en producción (VPS con facts reales de agente)
 
-MIT.
+| Métrica | FTS5 solo | FTS5 + HRR | Embeddings densos |
+|---|---|---|---|
+| Coverage @100 facts | 39.2% | **69.7%** | 72% |
+| Latencia por query | ~0.05ms | **~0.8ms** | ~185ms |
+| Dependencias extra | ninguna | numpy | fastembed + ONNX |
+
+HRR es 200-400x más rápido que embeddings densos con ~97% de su cobertura.
 
 ---
 
-## English
+## API
 
-Memory Etch provides local-first persistent memory for AI agents, backed by SQLite. No GPU, no external services, no mandatory dependencies.
+Documentación detallada en [`docs/api/`](docs/api/):
 
-### Quickstart
+- **[EtchStore](docs/api/store.md)** — Core SQLite: CRUD, FTS5, HRR, sesiones, relaciones, consolidación.
+- **[EtchRetriever](docs/api/retrieval.md)** — Búsqueda híbrida: FTS5 + HRR + Jaccard + embeddings con RRF.
+- **[QueryClassifier](docs/api/classifier.md)** — Clasificador rule-based para rutear estrategias de búsqueda.
 
-```python
-from memory_etch import EtchStore, EtchRetriever
+---
 
-store = EtchStore("memory.db")
-store.add_fact("FastAPI is a Python web framework", category="tech")
-store.add_fact("SQLite is an embedded database engine", category="tech")
+## Proyectos relacionados
 
-retriever = EtchRetriever(store)
-results = retriever.search("database engine")
-for r in results:
-    print(f"[{r['_score']:.2f}] {r['content']}")
-```
+| Proyecto | Diferenciador |
+|---|---|
+| **memory-etch** | Local-first, KISS, SQLite, sin runtime externo, HRR vectors |
+| **CodeGraph** | Code intelligence (tree-sitter + grafo de símbolos), NO es memoria de agente |
+| **AgentMemory** | Memoria full-featured con iii-engine dedicado, más features, más complejidad |
+| **Engram** | Memoria para agentes Go/MCP, sin embeddings, curada por el agente |
 
-### Install with Extras
+---
 
-```bash
-pip install "memory-etch[hrr]"          # recommended: FTS5 + HRR vectors
-pip install memory-etch                  # minimum: FTS5 + Jaccard
-pip install "memory-etch[embedding]"     # add fastembed for dense embeddings
-pip install "memory-etch[all]"           # everything
-pip install "memory-etch[bge-m3]"        # BGE-M3 embedding model (experimental)
-```
-
-### Web Viewer
+## Contribuir
 
 ```bash
-python -m memory_etch.viewer --db ./memory.db
-# Opens at http://127.0.0.1:9120
+git clone https://github.com/Basiliskode/memory-etch
+cd memory-etch
+pip install -e ".[dev]"
+python -m pytest tests/ -v
 ```
 
-### API Reference
+Todos los PRs son bienvenidos. Usamos conventional commits y TDD estricto.
 
-Detailed API documentation is available in the [`docs/api/`](docs/api/) directory:
+---
 
-- **[EtchStore](docs/api/store.md)** — Core SQLite-backed fact store: CRUD, FTS5 search, HRR encoding, session tracking, fact relations, soft delete, consolidation.
-- **[EtchRetriever](docs/api/retrieval.md)** — Hybrid search: FTS5 + HRR similarity + Jaccard re-rank + optional embedding vector search with RRF fusion.
-- **[QueryClassifier](docs/api/classifier.md)** — Lightweight rule-based query classifier for routing retrieval strategies by intent.
+## Licencia
 
-### Benchmarks
+MIT. Construí algo útil.
 
-Realistic estimates based on the existing FTS5 + HRR benchmark (measured on a commodity VPS with production agent data). The BGE-M3 column reflects projected headroom with dense embeddings.
+---
 
-| Metric | FTS5 only | FTS5 + HRR | FTS5 + HRR + BGE-M3 |
-|--------|-----------|------------|---------------------|
-| Recall @100 facts | ~39% | **~70%** | ~78% |
-| Latency per query | ~0.05ms | **~0.8ms** | ~200ms |
-| Extra dependencies | none | numpy | numpy + fastembed + ~2GB model |
-| Offline capable | ✅ | ✅ | ❌ (model download) |
-
-FTS5 + HRR delivers 200–400× faster queries than dense embeddings with comparable recall. The BGE-M3 path is best reserved for domains where the marginal recall gain justifies the latency and dependency cost.
+> Memory Etch nació dentro de un agente AI real que necesitaba acordarse de las cosas sin depender de servicios externos. Hoy corre en producción y está probado con miles de facts.
+>
+> Si estás construyendo un agente que necesite memoria, probalo. Son 30 segundos.
+>
+> ```bash
+> pip install "memory-etch[hrr]"
+> python -c "from memory_etch import EtchStore; s = EtchStore('test.db'); print('anda')"
+> ```
