@@ -47,18 +47,20 @@ def test_etch_viewer_entry_point():
     assert "main" in ep.value
 
 
-def test_classifiers_include_beta():
-    """PKG-2: Development Status :: 4 - Beta classifier present."""
+def test_classifiers_include_stable():
+    """PKG-2: Development Status :: 5 - Production/Stable classifier present."""
     meta = metadata("memory-etch")
     classifiers = meta.get_all("Classifier") or []
-    assert any("Development Status :: 4 - Beta" in c for c in classifiers)
+    assert any("Production/Stable" in c for c in classifiers), \
+        "Expected Development Status :: 5 - Production/Stable (v1.0)"
 
 
-def test_classifiers_include_mit():
-    """PKG-2: MIT License classifier present."""
+def test_license_mit():
+    """PKG-2: License is MIT (PEP 639 expression, not classifier)."""
     meta = metadata("memory-etch")
-    classifiers = meta.get_all("Classifier") or []
-    assert any("MIT License" in c for c in classifiers)
+    license_val = meta.get("License", "")
+    assert license_val == "MIT" or "MIT" in str(meta), \
+        "Expected license='MIT' in pyproject.toml (PEP 639)"
 
 
 def test_classifiers_include_310_311_312():

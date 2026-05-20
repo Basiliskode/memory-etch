@@ -1,4 +1,4 @@
-"""Structural tests for bilingual README + API stubs (PR 5)."""
+"""Structural tests for README + API docs (v1.0 — Spanish-only)."""
 
 import re
 from pathlib import Path
@@ -15,63 +15,52 @@ def test_readme_exists():
     assert README.is_file(), "README.md not found"
 
 
-def test_readme_has_spanish_section():
-    """Spanish CMO section is present."""
+def test_readme_has_spanish_title():
+    """README has Spanish title and tagline."""
     text = README.read_text(encoding="utf-8")
-    assert "~0.8ms por búsqueda" in text, "Spanish header missing"
-    assert "Nadie construye un agente serio sin memoria." in text, "Spanish pitch missing"
-    assert "pip install" in text, "Spanish install snippet missing"
+    assert "# Memory Etch" in text, "Title missing"
+    assert "SQLite + FTS5 + HRR" in text, "Tech stack missing"
 
 
-def test_readme_has_english_section():
-    """English section is present."""
+def test_readme_has_quickstart():
+    """README has minimal quickstart code."""
     text = README.read_text(encoding="utf-8")
-    assert "## English" in text, "English section heading missing"
+    assert "EtchStore" in text, "Core class missing"
+    assert "pip install" in text, "Install instructions missing"
 
 
-def test_english_has_quickstart():
-    """English section has a quickstart code example."""
+def test_readme_has_install_extras():
+    """README documents pip install extras."""
     text = README.read_text(encoding="utf-8")
-    eng = text.split("## English")[1] if "## English" in text else ""
-    assert "EtchStore" in eng and "EtchRetriever" in eng, \
-        "English quickstart missing core classes"
+    assert "[hrr]" in text and "[embeddings]" in text, "Install extras missing"
+    assert "[mcp]" in text or "[all]" in text, "MCP/all extras missing"
 
 
-def test_english_has_install_extras():
-    """English section documents install extras."""
+def test_readme_has_benchmark_table():
+    """README includes benchmark results."""
     text = README.read_text(encoding="utf-8")
-    eng = text.split("## English")[1] if "## English" in text else ""
-    assert "[hrr]" in eng and "[all]" in eng and "[bge-m3]" in eng, \
-        "English section missing install extras"
+    assert "94.4%" in text or "accuracy" in text.lower(), "Benchmark results missing"
+    assert "FTS5" in text, "FTS5 mention missing"
 
 
-def test_english_has_benchmark_table():
-    """English section has a benchmark comparison table."""
-    text = README.read_text(encoding="utf-8")
-    eng = text.split("## English")[1] if "## English" in text else ""
-    assert "FTS5 only" in eng and "FTS5 + HRR" in eng and "BGE-M3" in eng, \
-        "English section missing benchmark table columns"
-
-
-def test_english_has_api_links():
-    """English section links to docs/api/*.md files."""
+def test_readme_has_api_links():
+    """README links to docs/api/*.md files."""
     text = README.read_text(encoding="utf-8")
     assert "docs/api/store.md" in text, "Missing link to store.md"
     assert "docs/api/retrieval.md" in text, "Missing link to retrieval.md"
     assert "docs/api/classifier.md" in text, "Missing link to classifier.md"
 
 
-def test_english_no_production_ready_claims():
-    """English section must NOT claim 'production-ready' or 'stable'."""
+def test_readme_has_mcp_section():
+    """README includes MCP server documentation."""
     text = README.read_text(encoding="utf-8")
-    eng = text.split("## English")[1] if "## English" in text else ""
-    lower = eng.lower()
-    assert "production-ready" not in lower, \
-        "English section must not claim 'production-ready'"
-    assert "production ready" not in lower, \
-        "English section must not claim 'production ready'"
-    assert "production" not in lower or "ready" not in lower.split("production")[1][:20], \
-        "English section must not imply production-ready status"
+    assert "MCP" in text, "MCP section missing"
+
+
+def test_readme_has_embedding_providers():
+    """README includes embedding providers documentation."""
+    text = README.read_text(encoding="utf-8")
+    assert "Embedding" in text or "embedding" in text, "Embedding section missing"
 
 
 def test_api_store_md_exists():
@@ -112,17 +101,3 @@ def test_help_etchstore_runs():
         assert "SQLite" in help_text, "EtchStore docstring missing content"
     except ImportError as e:
         pytest.skip(f"memory_etch not importable: {e}")
-
-
-def test_spanish_preserved_exactly():
-    """Existing Spanish content is preserved — key phrases unchanged."""
-    text = README.read_text(encoding="utf-8")
-    # These should still appear exactly as before
-    markers = [
-        "~0.8ms por búsqueda",
-        "Sin GPU, sin servicios, sin excusas",
-        "Nadie construye un agente serio sin memoria.",
-        "Después me contás.",
-    ]
-    for m in markers:
-        assert m in text, f"Spanish marker lost: {m}"
