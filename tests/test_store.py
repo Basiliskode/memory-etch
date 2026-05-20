@@ -116,6 +116,39 @@ class TestStoreSoftDelete:
         assert fids[1] not in result_ids
 
 
+class TestRestore:
+    def test_restore_archived_fact(self, store):
+        fid = store.add_fact("Archived fact", category="general")
+        store.soft_delete_fact(fid, reason="curator: trust=0.05")
+        # Fact should be hidden
+        assert fid not in [f["fact_id"] for f in store.list_facts()]
+        # Restore
+        assert store.restore_fact(fid) is True
+        # Fact should be visible again
+        restored_ids = [f["fact_id"] for f in store.list_facts()]
+        assert fid in restored_ids
+        # deleted_reason should be cleared
+        fact = store.get_fact(fid)
+        assert fact["deleted"] == 0
+        assert fact["deleted_reason"] == ""
+
+    def test_restore_already_active_fact_returns_false(self, store):
+        fid = store.add_fact("Active fact", category="general")
+        result = store.restore_fact(fid)
+        assert result is False
+
+    def test_restore_nonexistent_fact_returns_false(self, store):
+        result = store.restore_fact(99999)
+        assert result is False
+
+    def test_restore_multiple_times(self, store):
+        """Restore is idempotent after first call."""
+        fid = store.add_fact("To archive", category="general")
+        store.soft_delete_fact(fid)
+        assert store.restore_fact(fid) is True  # First restore
+        assert store.restore_fact(fid) is False  # Already active — no-op
+
+
 class TestStoreEntities:
     def test_add_fact_with_entities(self, store):
         fid = store.add_fact("Python is great", category="tech", entities=["Python", "Programming"])
@@ -219,3 +252,41 @@ class TestStoreConsolidation:
     def test_purge_dry_run(self, store):
         result = store.purge_facts(dry_run=True)
         assert result["action"] == "dry_run"
+
+
+class TestExportImport:
+    def test_export_roundtrip(self, tmp_path, store):
+        # Add data
+        store.add_fact("Python is great", category="tech", tags="python", importance=0.9)
+        store.add_fact("FastAPI is fast", category="tech", tags="python,web")
+        store.start_session("s1")
+        store.end_session("s1")
+
+        # Export
+        out = tmp_path / "export.json"
+        stats = store.export_memory(str(out))
+        assert stats["facts"] == 2
+        assert out.exists()
+
+        # Import into a fresh store
+        store2 = EtchStore(":memory:", auto_migrate=True)
+        imported = store2.import_memory(str(out))
+        assert imported["facts"] == 2
+        assert imported["sessions"] >= 1
+        store2.close()
+
+    def test_export_empty_store(self, tmp_path, store):
+        out = tmp_path / "empty.json"
+        stats = store.export_memory(str(out))
+        assert stats["facts"] == 0
+        assert stats["sessions"] == 0
+
+    def test_import_into_existing_population(self, tmp_path, store):
+        store.add_fact("Original fact", category="general")
+        out = tmp_path / "data.json"
+        store.export_memory(str(out))
+
+        # Add the same data again (should be idempotent via content dedup)
+        imported = store.import_memory(str(out))
+        assert imported["facts"] >= 0  # dedup prevents full re-import
+        assert len(store.list_facts()) == 1  # content dedup kept it to 1

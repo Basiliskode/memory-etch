@@ -103,3 +103,49 @@ class TestRetrieverFilters:
             results_after = retriever.search("Python")
             after_ids = [r["fact_id"] for r in results_after]
             assert results_before[0]["fact_id"] not in after_ids
+
+
+class TestRetrievalFeedback:
+    """Retrieval reinforces trust_score (retrieval feedback loop)."""
+
+    def test_search_increases_trust(self, store_with_facts):
+        store = store_with_facts
+        # Get baseline trust for "Python" fact
+        before = store._conn.execute(
+            "SELECT trust_score, retrieval_count FROM facts WHERE content LIKE '%Python is a programming%'"
+        ).fetchone()
+        assert before is not None
+        before_trust = before["trust_score"]
+
+        # Search — triggers reinforcement
+        store.search_facts("programming language")
+        after = store._conn.execute(
+            "SELECT trust_score, retrieval_count FROM facts WHERE content LIKE '%Python is a programming%'"
+        ).fetchone()
+        assert after["trust_score"] > before_trust
+        assert after["retrieval_count"] >= 1
+
+    def test_search_retrieval_count_increments(self, store_with_facts):
+        store = store_with_facts
+        before = store._conn.execute(
+            "SELECT retrieval_count FROM facts WHERE content LIKE '%SQLite%'"
+        ).fetchone()[0]
+
+        store.search_facts("database engine")
+        after = store._conn.execute(
+            "SELECT retrieval_count FROM facts WHERE content LIKE '%SQLite%'"
+        ).fetchone()[0]
+        assert after == before + 1
+
+    def test_search_resets_unknown_facts_not_affected(self, store_with_facts):
+        store = store_with_facts
+        before = store._conn.execute(
+            "SELECT trust_score FROM facts WHERE content LIKE '%Docker%'"
+        ).fetchone()[0]
+
+        # Search for something unrelated to Docker
+        store.search_facts("programming language")
+        after = store._conn.execute(
+            "SELECT trust_score FROM facts WHERE content LIKE '%Docker%'"
+        ).fetchone()[0]
+        assert after == before  # no change

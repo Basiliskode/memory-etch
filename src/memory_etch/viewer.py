@@ -19,6 +19,7 @@ import urllib.parse
 from pathlib import Path
 
 from .store import EtchStore
+from .curator import EtchCurator
 
 logger = logging.getLogger(__name__)
 
@@ -503,6 +504,16 @@ class ViewerHandler(http.server.BaseHTTPRequestHandler):
                 "fact_count": facts, "session_count": sessions, "relation_count": relations,
                 "extraction_count": extractions, "active_sessions": active,
             })
+
+        elif path == "/api/curator/stats":
+            try:
+                store = EtchStore(db_path=str(self.server._db_path))
+                curator = EtchCurator(store)
+                stats = curator.curate()
+                store.close()
+                self._json({"status": "ok", **stats})
+            except Exception as e:
+                self._json({"status": "error", "detail": str(e)})
 
         elif path == "/api/projects":
             try:

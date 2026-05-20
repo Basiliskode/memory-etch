@@ -619,6 +619,28 @@ class EtchStore:
             self._invalidate_hrr_cache(fact_id)
         return cur.rowcount > 0
 
+    def restore_fact(self, fact_id: int) -> bool:
+        """Restore a previously soft-deleted or archived fact.
+
+        Sets ``deleted = 0`` and clears ``deleted_reason``, making the fact
+        visible in searches again. No-op if the fact is already active.
+
+        Args:
+            fact_id: ID of the fact to restore.
+
+        Returns:
+            True if a fact was restored, False if not found or already active.
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE facts SET deleted=0, deleted_reason='' "
+                "WHERE fact_id=? AND deleted=1",
+                (fact_id,),
+            )
+            self._conn.commit()
+            self._invalidate_hrr_cache(fact_id)
+        return cur.rowcount > 0
+
     def purge_facts(self, dry_run: bool = True) -> dict:
         """Purge low-value facts: >90d old, low trust <0.3, low importance <0.5.
 
@@ -649,13 +671,33 @@ class EtchStore:
             self._conn.commit()
             return {"action": "purged", "count": count}
 
+    def _reinforce_facts(self, fact_ids: list[int]) -> None:
+        """Boost trust_score and increment retrieval_count for retrieved facts.
+
+        Each retrieval gives a small trust boost (0.01), capping at 1.0.
+        Called internally after search to implement the retrieval feedback loop.
+        """
+        if not fact_ids:
+            return
+        placeholders = ",".join("?" for _ in fact_ids)
+        self._conn.execute(
+            f"""UPDATE facts SET
+                    retrieval_count = retrieval_count + 1,
+                    trust_score = MIN(1.0, ROUND(trust_score + 0.01, 4))
+                WHERE fact_id IN ({placeholders})""",
+            fact_ids,
+        )
+        self._conn.commit()
+
     def search_facts(
         self,
         query: str,
         limit: int = 10,
         exclude_deleted: bool = True,
     ) -> list[dict]:
-        """Full-text search via FTS5."""
+        """Full-text search via FTS5.
+
+        """
         with self._lock:
             try:
                 sql = """SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score,
@@ -686,6 +728,8 @@ class EtchStore:
 
         SQL pre-filter narrows candidates; Python ``struct.unpack`` decodes
         float32 arrays and computes cosine similarity in a loop.
+
+        Retrieved facts get a small trust boost (retrieval feedback loop).
 
         Returns list of fact dicts sorted by cosine similarity descending.
         """
@@ -736,7 +780,11 @@ class EtchStore:
             scored.append((sim, d))
 
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [d for _, d in scored[:limit]]
+        results = [d for _, d in scored[:limit]]
+        # Reinforce retrieved facts
+        with self._lock:
+            self._reinforce_facts([r["fact_id"] for r in results])
+        return results
 
     def update_fact(self, fact_id: int, **kwargs) -> bool:
         """Update fact fields.
@@ -1211,7 +1259,10 @@ class EtchStore:
                 sql += " ORDER BY fts.rank LIMIT ?"
                 params.append(limit)
                 rows = self._conn.execute(sql, params).fetchall()
-                return [dict(r) for r in rows]
+                results = [dict(r) for r in rows]
+                # Retrieval feedback loop — reinforce returned facts
+                self._reinforce_facts([r["fact_id"] for r in rows])
+                return results
             except Exception:
                 return []
 
@@ -1279,6 +1330,137 @@ class EtchStore:
                 "SELECT DISTINCT project FROM facts WHERE project != '' AND (deleted IS NULL OR deleted = 0) ORDER BY project"
             ).fetchall()
         return [r[0] for r in rows]
+
+    # ------------------------------------------------------------------
+    # Export / Import
+    # ------------------------------------------------------------------
+
+    def export_memory(self, path: str) -> dict:
+        """Export all memory data to a JSON file.
+
+        Includes all active facts, sessions, fact relations, and turn buffer
+        entries. HRR vectors and embeddings are excluded from the dump.
+
+        Args:
+            path: File path for the JSON export.
+
+        Returns:
+            Stats dict with counts of exported items.
+        """
+        with self._lock:
+            facts = self._conn.execute(
+                "SELECT fact_id, content, category, tags, trust_score, importance, "
+                "project, session_id, topic_key, revision_count, retrieval_count, "
+                "consolidated, deleted, deleted_reason, created_at, updated_at "
+                "FROM facts ORDER BY fact_id"
+            ).fetchall()
+
+            sessions = self._conn.execute(
+                "SELECT session_id, project, status, fact_count, summary, "
+                "metadata, started_at, ended_at FROM sessions ORDER BY session_id"
+            ).fetchall()
+
+            relations = self._conn.execute(
+                "SELECT relation_id, fact_id_a, fact_id_b, relation_type, "
+                "confidence, judged_by, created_at FROM fact_relations ORDER BY relation_id"
+            ).fetchall()
+
+            turns = self._conn.execute(
+                "SELECT turn_id, session_id, role, content, meaningful, created_at "
+                "FROM turn_buffer ORDER BY turn_id"
+            ).fetchall()
+
+        data = {
+            "version": 1,
+            "facts": [dict(r) for r in facts],
+            "sessions": [dict(r) for r in sessions],
+            "relations": [dict(r) for r in relations],
+            "turns": [dict(r) for r in turns],
+        }
+
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str)
+
+        return {
+            "facts": len(data["facts"]),
+            "sessions": len(data["sessions"]),
+            "relations": len(data["relations"]),
+            "turns": len(data["turns"]),
+        }
+
+    def import_memory(self, path: str) -> dict:
+        """Import memory data from a JSON file created by ``export_memory``.
+
+        Facts are inserted via ``add_fact`` (respecting content dedup/topic upsert).
+        Sessions, relations, and turn buffer entries are inserted directly.
+
+        Args:
+            path: File path to the JSON export.
+
+        Returns:
+            Stats dict with counts of imported items.
+        """
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        imported = {"facts": 0, "sessions": 0, "relations": 0, "turns": 0}
+
+        for row in data.get("facts", []):
+            self.add_fact(
+                content=row["content"],
+                category=row.get("category", "general"),
+                tags=row.get("tags", ""),
+                trust_score=row.get("trust_score", 0.5),
+                importance=row.get("importance", 0.5),
+                project=row.get("project", ""),
+                session_id=row.get("session_id", ""),
+                topic_key=row.get("topic_key", ""),
+            )
+            imported["facts"] += 1
+
+        with self._lock:
+            for row in data.get("sessions", []):
+                self._conn.execute(
+                    """INSERT OR IGNORE INTO sessions
+                       (session_id, project, status, fact_count, summary, metadata, started_at, ended_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        row["session_id"], row.get("project", ""),
+                        row.get("status", "ended"), row.get("fact_count", 0),
+                        row.get("summary", ""), row.get("metadata", "{}"),
+                        row.get("started_at"), row.get("ended_at"),
+                    ),
+                )
+                imported["sessions"] += 1
+
+            for row in data.get("relations", []):
+                self._conn.execute(
+                    """INSERT OR IGNORE INTO fact_relations
+                       (fact_id_a, fact_id_b, relation_type, confidence, judged_by, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        row["fact_id_a"], row["fact_id_b"], row["relation_type"],
+                        row.get("confidence", 1.0), row.get("judged_by", "import"),
+                        row.get("created_at"),
+                    ),
+                )
+                imported["relations"] += 1
+
+            for row in data.get("turns", []):
+                self._conn.execute(
+                    """INSERT OR IGNORE INTO turn_buffer
+                       (session_id, role, content, meaningful, created_at)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (
+                        row["session_id"], row["role"], row["content"],
+                        row.get("meaningful", 0), row.get("created_at"),
+                    ),
+                )
+                imported["turns"] += 1
+
+            self._conn.commit()
+
+        return imported
 
     # ------------------------------------------------------------------
     # Cleanup

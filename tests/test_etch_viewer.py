@@ -148,6 +148,17 @@ class TestViewer:
         assert "path" in data
         assert data["path"].endswith("etch_memory.db")
 
+    def test_curator_stats_endpoint(self, viewer_server):
+        """GET /api/curator/stats returns curation stats."""
+        status, data = _get(viewer_server + "/api/curator/stats")
+        assert status == 200
+        assert data["status"] == "ok"
+        assert "decayed" in data
+        assert "archived" in data
+        assert "pruned" in data
+        assert "vacuumed" in data
+        assert "duration_ms" in data
+
     def test_relations_endpoint(self, viewer_server):
         """GET /api/relations handles missing table gracefully."""
         status, data = _get(viewer_server + "/api/relations/8")

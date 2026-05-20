@@ -146,7 +146,20 @@ class EtchRetriever:
                 params.append(fetch_limit)
 
                 rows = self._store._conn.execute(sql, params).fetchall()
-                return [dict(r) for r in rows]
+                results = [dict(r) for r in rows]
+                # Reinforce retrieved facts (retrieval feedback loop)
+                if results:
+                    ids = [r["fact_id"] for r in rows]
+                    placeholders = ",".join("?" for _ in ids)
+                    self._store._conn.execute(
+                        f"""UPDATE facts SET
+                                retrieval_count = retrieval_count + 1,
+                                trust_score = MIN(1.0, ROUND(trust_score + 0.01, 4))
+                            WHERE fact_id IN ({placeholders})""",
+                        ids,
+                    )
+                    self._store._conn.commit()
+                return results
             except Exception:
                 logger.exception("FTS5 search failed")
                 return []
