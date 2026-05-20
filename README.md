@@ -1,5 +1,5 @@
 <p align="center">
-<img width="1448" height="1086" alt="ChatGPT Image 20 may 2026, 19_51_34" src="https://github.com/user-attachments/assets/ff644920-c23d-4f3c-b4c1-7055e17d6bbf" />
+<img width="724" height="543" alt="ChatGPT Image 20 may 2026, 19_51_34" src="https://github.com/user-attachments/assets/ff644920-c23d-4f3c-b4c1-7055e17d6bbf" />
 <p/>
     
 # Memory Etch
