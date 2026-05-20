@@ -27,11 +27,14 @@ Quick start:
 from .store import EtchStore
 from .retrieval import EtchRetriever
 from .classifier import QueryClassifier
+from .etch import EtchMemoryProvider, _extractor_get_provider_config
 from . import hrr
 
 __all__ = [
     "EtchStore",
     "EtchRetriever",
+    "EtchMemoryProvider",
+    "_extractor_get_provider_config",
     "QueryClassifier",
     "hrr",
 ]

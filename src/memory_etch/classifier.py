@@ -39,7 +39,16 @@ class QueryClassifier:
     def classify(self, query: str) -> dict:
         """Classify a query into an intent and extract entities.
 
-        Returns {"intent": str, "entities": list[str], "keywords": list[str]}.
+        Uses keyword pattern matching to determine the query intent.
+        Intent can be one of: ``search``, ``entity``, ``probe``,
+        ``project``, ``relation``, ``timeline``, ``contradict``, ``empty``.
+
+        Args:
+            query: The user's query string.
+
+        Returns:
+            Dict with keys ``intent`` (str), ``entities`` (list[str]),
+            and ``keywords`` (list[str]).
         """
         if not query or not query.strip():
             return {"intent": "empty", "entities": [], "keywords": []}

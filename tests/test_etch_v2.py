@@ -488,6 +488,27 @@ class TestEmbeddingColumn:
         results = store.search_by_vector(query_vec, category="nonexistent", limit=5)
         assert results == []
 
+    def test_search_by_vector_respects_project(self, store):
+        """search_by_vector applies project filter."""
+        import struct
+        vec = struct.pack("384f", *([1.0] + [0.0] * 383))
+        store.add_fact(
+            "alpha project fact",
+            project="alpha",
+            embedding=vec,
+        )
+        store.add_fact(
+            "beta project fact",
+            project="beta",
+            embedding=vec,
+        )
+        query_vec = struct.pack("384f", *([0.9] + [0.0] * 383))
+        results = store.search_by_vector(query_vec, project="alpha", limit=5)
+        assert len(results) == 1, f"Expected 1 alpha result, got {len(results)}"
+        assert "alpha" in results[0]["content"]
+        results_beta = store.search_by_vector(query_vec, project="nonexistent", limit=5)
+        assert results_beta == []
+
 
 class TestRRFFusion:
 

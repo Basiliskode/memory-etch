@@ -279,6 +279,14 @@ class EtchRetriever:
         """Search by topic tag or content keyword.
 
         Matches facts where the tag or content contains *topic*.
+
+        Args:
+            topic: Keyword to search for in tags and content.
+            limit: Max results (default: 10).
+            project: Optional project filter.
+
+        Returns:
+            List of fact dicts with a ``_score`` key.
         """
         with self._store._lock:
             conditions: list[str] = ["(f.deleted IS NULL OR f.deleted = 0)"]
@@ -301,10 +309,73 @@ class EtchRetriever:
             r["_score"] = r.get("trust_score", 0.5)
         return results
 
+    def related(self, topic: str, limit: int = 10) -> list[dict]:
+        """Find facts related to a topic via entities + FTS5.
+
+        Searches for facts that share entities with the given topic,
+        falling back to FTS5 content match.
+
+        Args:
+            topic: Topic keyword to search related facts for.
+            limit: Max results (default: 10).
+
+        Returns:
+            List of fact dicts related to the topic.
+        """
+        # First: find entities matching the topic
+        with self._store._lock:
+            entity_rows = self._store._conn.execute(
+                "SELECT entity_id FROM entities WHERE name LIKE ? LIMIT 5",
+                (f"%{topic}%",),
+            ).fetchall()
+            entity_ids = [r["entity_id"] for r in entity_rows]
+
+            if entity_ids:
+                placeholders = ",".join("?" * len(entity_ids))
+                rows = self._store._conn.execute(
+                    f"""SELECT DISTINCT f.fact_id, f.content, f.category, f.tags, f.trust_score,
+                               f.project, f.created_at, f.session_id
+                        FROM facts f
+                        JOIN fact_entities fe ON fe.fact_id = f.fact_id
+                        WHERE fe.entity_id IN ({placeholders})
+                          AND (f.deleted IS NULL OR f.deleted = 0)
+                        ORDER BY f.trust_score DESC
+                        LIMIT ?""",
+                    entity_ids + [limit],
+                ).fetchall()
+            else:
+                # Fallback: FTS5 search on topic
+                try:
+                    rows = self._store._conn.execute(
+                        """SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score,
+                                  f.project, f.created_at, f.session_id
+                           FROM facts f
+                           JOIN facts_fts fts ON fts.rowid = f.fact_id
+                           WHERE facts_fts MATCH ?
+                             AND (f.deleted IS NULL OR f.deleted = 0)
+                           ORDER BY fts.rank
+                           LIMIT ?""",
+                        (topic, limit),
+                    ).fetchall()
+                except Exception:
+                    rows = []
+        results = [dict(r) for r in rows]
+        for r in results:
+            r["_score"] = r.get("trust_score", 0.5)
+        return results
+
     def contradict(self, limit: int = 10) -> list[dict]:
         """Find contradictions — known (fact_relations) then algorithmic.
 
-        Returns up to *limit* contradictory fact pairs.
+        First checks existing relations, then falls back to a heuristic
+        scan of facts sharing the same category within a project.
+
+        Args:
+            limit: Max contradiction pairs to return (default: 10).
+
+        Returns:
+            List of contradictory fact pair dicts with ``fact_id_a``,
+            ``content_a``, ``fact_id_b``, ``content_b``, and ``source``.
         """
         # 1. Known contradictions from fact_relations
         known = self._store.get_contradictions(limit)
