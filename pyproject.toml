@@ -4,30 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memory-etch"
-version = "0.3.0"
-description = "KISS persistent memory for AI agents — SQLite + FTS5 + HRR vectors"
+version = "1.0.0"
+description = "Memoria persistente local-first para agentes AI — SQLite + FTS5 + HRR + embeddings opcionales"
 readme = "README.md"
 license = "MIT"
 authors = [
     {name = "Hermie Cell", email = "hermie@basiliskode.dev"},
 ]
-keywords = ["memory", "ai", "agent", "sqlite", "fts5", "hrr", "embedding"]
+keywords = ["memory", "ai", "agent", "sqlite", "fts5", "hrr", "embedding", "local-first"]
 requires-python = ">=3.10,<3.13"
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
 ]
-dependencies = [
-    "datasets>=4.8.5",
-    "google-genai>=2.4.0",
-    "rich>=15.0.0",
-    "typer>=0.25.1",
-]
+dependencies = []
 
 [project.optional-dependencies]
 hrr = ["numpy>=1.24.0"]
@@ -35,7 +31,7 @@ embedding = ["fastembed>=0.5.0", "httpx>=0.27"]
 embeddings = ["fastembed>=0.5.0", "httpx>=0.27", "numpy>=1.24.0"]
 bge-m3 = ["fastembed>=0.5.0"]
 mcp = ["mcp>=1.0.0"]
-all = ["memory-etch[hrr]", "memory-etch[embedding]"]
+all = ["memory-etch[hrr]", "memory-etch[embeddings]", "memory-etch[mcp]"]
 
 [project.scripts]
 etch-viewer = "memory_etch.viewer:main"
