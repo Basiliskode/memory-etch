@@ -52,3 +52,14 @@ pythonpath = ["src"]
 #   test_etch_migration.py — v3 backward compat with Hermes API
 # Run them manually if you have Hermes Agent installed:
 #   python -m pytest tests/test_etch_e2e.py tests/test_etch_contract.py tests/test_etch_migration.py
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
