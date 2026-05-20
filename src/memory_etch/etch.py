@@ -108,6 +108,10 @@ class EtchMemoryProvider:
         self._paused_until: float = 0.0
         self._consecutive_failures: int = 0
         self._total_extractions: int = 0
+        logger.info(
+            "_call_llm_extract is not configured; "
+            "LLM extraction requires an LLM provider or a custom callable via auto_extract_llm"
+        )
         self._lock = threading.Lock()
 
     def initialize(self, session_id: str) -> None:
@@ -239,9 +243,13 @@ class EtchMemoryProvider:
         """Call the LLM for extraction. This is mocked in E2E tests.
 
         In production this would call the configured API.
+
+        Raises:
+            RuntimeError: With guidance on configuring LLM extraction.
         """
-        raise NotImplementedError(
-            "_call_llm_extract must be patched or overridden in production"
+        raise RuntimeError(
+            "To use LLM extraction, install Hermes provider or provide a custom callable "
+            "via auto_extract_llm. See docs/extraction.md for details."
         )
 
     def _parse_llm_response(self, raw: str) -> Optional[dict]:
