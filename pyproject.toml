@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memory-etch"
-version = "0.2.0"
+version = "0.3.0"
 description = "KISS persistent memory for AI agents — SQLite + FTS5 + HRR vectors"
 readme = "README.md"
 license = "MIT"
@@ -56,6 +56,7 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+exclude = ["**/translator_deprecated"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "ARG"]

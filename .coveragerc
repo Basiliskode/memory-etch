@@ -5,7 +5,7 @@ omit =
     */tests/*
     */.eggs/*
     */plugins/*
-    */translator/*
+    */translator_deprecated/*
     src/memory_etch/classifier.py
     src/memory_etch/viewer.py
 

@@ -86,7 +86,7 @@ def test_coveragerc_sets_source_and_omits_non_core_paths():
     assert "[run]" in content
     assert "source =" in content
     assert "src" in content
-    for omitted in ("*/tests/*", "*/plugins/*", "*/translator/*"):
+    for omitted in ("*/tests/*", "*/plugins/*", "*/translator_deprecated/*"):
         assert omitted in content
 
 
