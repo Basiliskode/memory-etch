@@ -285,12 +285,38 @@ Resultado de referencia (100 docs, 18 queries):
 
 ## Web Viewer
 
+Visualizá toda la memoria de tu agente en un SPA local, sin servidores, sin config.
+
 ```bash
 python -m memory_etch.viewer --db ./memory.db
 # http://127.0.0.1:9120
 ```
 
-SPA con diseño mint: buscador, timeline, relaciones, metadata por fact.
+**Qué ves:**
+
+| Feature | Para qué sirve |
+|---|---|
+| **Buscador** | Buscá facts por contenido, proyecto, o categoría |
+| **Timeline** | Cronología por sesión — qué pasó y cuándo |
+| **Relaciones** | Facts conectados: compatible, conflicts_with, supersedes |
+| **Metadata** | trust_score, retrieval_count, categoría, proyecto |
+| **Soft delete** | Facts archivados no se pierden, se ocultan |
+
+**Combinado con la DB versionable:**
+
+```bash
+# Compartí la misma memoria con tu equipo
+git add memory.db
+git commit -m "seed data: 500 facts de referencia"
+git push
+
+# Otro dev hace pull y abre el viewer
+git pull
+python -m memory_etch.viewer --db memory.db
+# → ve exactamente los mismos facts, relaciones, timeline
+```
+
+Útil para debuggear el estado de un agente, revisar qué facts acumuló, o compartir datasets de prueba con el equipo.
 
 ---
 
