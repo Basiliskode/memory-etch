@@ -284,7 +284,9 @@ Resultado de referencia (100 docs, 18 queries):
 ---
 
 ## Web Viewer
-
+<p align="center">
+<img width="1080" height="1080" alt="Diseño sin título (3)" src="https://github.com/user-attachments/assets/297c461c-b7dc-4fe3-9ace-aed647b774ca" />
+<p/>
 Visualizá toda la memoria de tu agente en un SPA local, sin servidores, sin config.
 
 ```bash
