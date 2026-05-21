@@ -31,7 +31,9 @@ embeddings = ["fastembed>=0.5.0", "httpx>=0.27", "numpy>=1.24.0"]
 bge-m3 = ["fastembed>=0.5.0"]
 mcp = ["mcp>=1.0.0"]
 benchmark = ["google-genai>=2.4.0"]
-all = ["memory-etch[hrr]", "memory-etch[embeddings]", "memory-etch[mcp]"]
+openai = ["openai>=1.0.0"]
+anthropic = ["anthropic>=0.30.0"]
+all = ["memory-etch[hrr]", "memory-etch[embeddings]", "memory-etch[mcp]", "memory-etch[openai]", "memory-etch[anthropic]"]
 
 [project.scripts]
 etch-viewer = "memory_etch.viewer:main"

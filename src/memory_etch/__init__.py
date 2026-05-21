@@ -31,6 +31,8 @@ from .etch import EtchMemoryProvider, _extractor_get_provider_config
 from . import embedding
 from . import hrr
 from .embedding import EmbeddingProvider, NoopProvider
+from .interceptor import InterceptorHandle, intercept, teardown_all
+from .interceptor.generic import GenericInterceptor
 
 __all__ = [
     "EtchStore",
@@ -42,6 +44,10 @@ __all__ = [
     "EmbeddingProvider",
     "NoopProvider",
     "hrr",
+    "InterceptorHandle",
+    "intercept",
+    "teardown_all",
+    "GenericInterceptor",
 ]
 
 __version__ = "0.3.0"
