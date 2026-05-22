@@ -81,7 +81,8 @@ class EtchRetriever:
 
     Args:
         store: EtchStore instance.
-        hrr_dim: HRR vector dimension (default: 256).
+        hrr_dim: Optional HRR vector dimension. When omitted, the retriever
+            uses the store's effective HRR dimension.
         hrr_weight: Blend weight for HRR vs FTS5 (0.0 = FTS5 only, 1.0 = HRR only).
         reranker: Optional callback reranker(query, candidates) → ranked candidates.
         rerank_min_score: Minimum top score to skip reranker (0.0 = always rerank).
@@ -92,14 +93,14 @@ class EtchRetriever:
     def __init__(
         self,
         store: EtchStore,
-        hrr_dim: int = 256,
+        hrr_dim: Optional[int] = None,
         hrr_weight: float = _DEFAULT_HRR_WEIGHT,
         reranker: Optional[Callable] = None,
         rerank_min_score: float = 0.0,
         compute_embedding: Optional[Callable[[str], list[float]]] = None,
     ):
         self._store = store
-        self._hrr_dim = hrr_dim
+        self._hrr_dim = hrr_dim if hrr_dim is not None else store.get_effective_hrr_dim()
         self._hrr_weight = hrr_weight
         self._reranker = reranker
         self._rerank_min_score = rerank_min_score
@@ -278,12 +279,28 @@ class EtchRetriever:
                     if blob:
                         existing_vec = self._store._get_hrr_cached(c["fact_id"])
                         if existing_vec is not None:
-                            hrr_sim = max(0, hrr.similarity(query_vec, existing_vec))
+                            if len(query_vec) != len(existing_vec):
+                                logger.warning(
+                                    "Skipping HRR similarity for fact %s: query dim %s != stored dim %s",
+                                    c.get("fact_id"),
+                                    len(query_vec),
+                                    len(existing_vec),
+                                )
+                            else:
+                                hrr_sim = max(0, hrr.similarity(query_vec, existing_vec))
                         else:
                             vec = hrr.bytes_to_phases(blob)
-                            hrr_sim = max(0, hrr.similarity(query_vec, vec))
+                            if len(query_vec) != len(vec):
+                                logger.warning(
+                                    "Skipping HRR similarity for fact %s: query dim %s != stored dim %s",
+                                    c.get("fact_id"),
+                                    len(query_vec),
+                                    len(vec),
+                                )
+                            else:
+                                hrr_sim = max(0, hrr.similarity(query_vec, vec))
                 except Exception:
-                    pass
+                    logger.exception("HRR similarity failed for fact %s", c.get("fact_id"))
 
             score += hrr_sim * self._hrr_weight
 

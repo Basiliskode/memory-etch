@@ -149,3 +149,35 @@ class TestRetrievalFeedback:
             "SELECT trust_score FROM facts WHERE content LIKE '%Docker%'"
         ).fetchone()[0]
         assert after == before  # no change
+
+
+class TestRetrieverHRRDimensions:
+    """Regression tests for mixed HRR vector dimensions."""
+
+    def test_retriever_uses_store_effective_hrr_dim_by_default(self):
+        store = EtchStore(":memory:", hrr_dim=1024, auto_migrate=True)
+        try:
+            store.add_fact("HRR dimension mismatch should still score semantically")
+            store._flush_pending_hrr_batch()
+
+            retriever = EtchRetriever(store)
+            results = retriever.search("HRR dimension mismatch", limit=3)
+
+            assert results
+            assert results[0]["_hrr_sim"] > 0
+            assert retriever._hrr_dim == 1024
+        finally:
+            store.close()
+
+    def test_compute_hrr_batch_public_alias_flushes_pending_vectors(self):
+        store = EtchStore(":memory:", auto_migrate=True)
+        try:
+            fact_id = store.add_fact("Public HRR batch computation should exist")
+            store.compute_hrr_batch()
+
+            row = store._conn.execute(
+                "SELECT hrr_vector FROM facts WHERE fact_id = ?", (fact_id,)
+            ).fetchone()
+            assert row["hrr_vector"] is not None
+        finally:
+            store.close()

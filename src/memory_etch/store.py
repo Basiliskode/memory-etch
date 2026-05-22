@@ -445,6 +445,23 @@ class EtchStore:
                 pass
         return self._hrr_dim
 
+    def get_effective_hrr_dim(self) -> int:
+        """Return the HRR dimension currently used by this store.
+
+        Existing databases may contain HRR vectors created with a dimension
+        different from the constructor default. Retrieval code should call this
+        method instead of assuming its own default dimension.
+        """
+        return self._get_effective_hrr_dim()
+
+    def compute_hrr_batch(self) -> None:
+        """Flush pending HRR vectors synchronously.
+
+        Public compatibility wrapper for integrations that need to force HRR
+        computation before searching or shutting down.
+        """
+        self._flush_pending_hrr_batch()
+
     # ------------------------------------------------------------------
     # HRR cache
     # ------------------------------------------------------------------
