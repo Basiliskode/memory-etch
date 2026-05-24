@@ -79,6 +79,9 @@ def install_openai(
                     topic_key=f"conversation/{conv_id}/t{_turn_counter:04d}/{role}",
                     trust_score=0.9,
                     importance=0.5,
+                    source_harness="openai",
+                    source_kind="conversation",
+                    source_agent=model,
                 )
 
         # 2. Call original (pass all args/kwargs as-is, preserving self if bound)
@@ -97,6 +100,9 @@ def install_openai(
             topic_key=f"conversation/{conv_id}/t{_turn_counter:04d}/assistant",
             trust_score=0.9,
             importance=0.5,
+            source_harness="openai",
+            source_kind="conversation",
+            source_agent=model,
         )
 
         return result

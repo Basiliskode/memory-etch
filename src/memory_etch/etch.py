@@ -23,6 +23,8 @@ _DEFAULT_CONFIG = {
     "extract_min_buffer": 5,
     "extract_max_batch": 20,
     "db_path": "",
+    "source_harness": "hermes",
+    "source_agent": "",
 }
 
 # Patterns to detect meaningful content (heuristic)
@@ -319,6 +321,9 @@ class EtchMemoryProvider:
                     tags=tags,
                     importance=importance,
                     session_id=session_id,
+                    source_harness=self.config.get("source_harness", "hermes"),
+                    source_agent=self.config.get("source_agent", ""),
+                    source_kind="conversation",
                 )
                 added += 1
         return added
@@ -371,6 +376,10 @@ class EtchMemoryProvider:
                 project=args.get("project", ""),
                 session_id=args.get("session_id", self._session_id),
                 topic_key=args.get("topic_key", ""),
+                source_harness=args.get("source_harness", self.config.get("source_harness", "hermes")),
+                source_agent=args.get("source_agent", self.config.get("source_agent", "")),
+                source_kind=args.get("source_kind", "provider"),
+                scope=args.get("scope", "canonical"),
             )
             return json.dumps({"fact_id": fid, "action": "added"})
 

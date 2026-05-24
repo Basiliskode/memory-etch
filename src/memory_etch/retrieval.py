@@ -114,6 +114,10 @@ class EtchRetriever:
         project: str = "",
         mode: str = "",
         fallback_thresholds: Optional[list[int]] = None,
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
         """Hybrid search: FTS5 + optional HRR + Jaccard + optional vector.
 
@@ -126,6 +130,9 @@ class EtchRetriever:
           3. If results < threshold: embedding vector search (if configured)
           4. Results merged at each cascade level
 
+        Default scope is ``'canonical'`` — only canonical facts are returned
+        unless an explicit scope is requested.
+
         Args:
             query: Search text.
             limit: Max results.
@@ -135,16 +142,24 @@ class EtchRetriever:
                 the existing single-pass hybrid search.
             fallback_thresholds: Per-level minimum results to stop cascading.
                 Default: ``[3, 3]`` (stop after FTS5 if ≥3, stop after HRR if ≥3).
+            scope: Scope filter (default: ``'canonical'``).
+            source_harness: Optional source harness filter.
+            source_agent: Optional source agent filter.
+            source_kind: Optional source kind filter.
 
         Returns list of dicts sorted by combined relevance score (``score`` key).
         """
         if mode == "auto":
             return self._search_auto(
                 query, limit, exclude_deleted, project, fallback_thresholds,
+                scope=scope, source_harness=source_harness,
+                source_agent=source_agent, source_kind=source_kind,
             )
 
         # --- Original behavior (backward compatible) ---
-        fts5_stream = self._fts_candidates(query, limit * 2, exclude_deleted, project)
+        fts5_stream = self._fts_candidates(query, limit * 2, exclude_deleted, project,
+                                           scope=scope, source_harness=source_harness,
+                                           source_agent=source_agent, source_kind=source_kind)
         if not fts5_stream:
             return []
 
@@ -164,6 +179,8 @@ class EtchRetriever:
                     vec_bytes = struct.pack(f"{len(q_vec)}f", *q_vec)
                     vector_stream = self._store.search_by_vector(
                         vec_bytes, limit=limit * 2, project=project,
+                        scope=scope, source_harness=source_harness,
+                        source_agent=source_agent, source_kind=source_kind,
                     )
             except Exception:
                 logger.exception("Vector search failed, falling back to FTS5-only")
@@ -190,10 +207,14 @@ class EtchRetriever:
         limit: int = 10,
         exclude_deleted: bool = True,
         project: str = "",
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
         """Fetch candidates from FTS5 with headroom for re-scoring.
 
-        Optionally filters by project.
+        Optionally filters by project, scope, and source metadata.
         """
         with self._store._lock:
             try:
@@ -213,6 +234,18 @@ class EtchRetriever:
                 if project:
                     conditions.append("f.project = ?")
                     params.append(project)
+                if scope:
+                    conditions.append("f.scope = ?")
+                    params.append(scope)
+                if source_harness:
+                    conditions.append("f.source_harness = ?")
+                    params.append(source_harness)
+                if source_agent:
+                    conditions.append("f.source_agent = ?")
+                    params.append(source_agent)
+                if source_kind:
+                    conditions.append("f.source_kind = ?")
+                    params.append(source_kind)
                 if conditions:
                     sql += " AND " + " AND ".join(conditions)
                 sql += " ORDER BY fts.rank LIMIT ?"
@@ -451,6 +484,10 @@ class EtchRetriever:
         max_depth: int = _DEFAULT_MAX_DEPTH,
         exclude_deleted: bool = True,
         project: str = "",
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
         """FTS5 search with progressive query expansion.
 
@@ -470,6 +507,10 @@ class EtchRetriever:
             max_depth: Number of expansion stages (default: 3).
             exclude_deleted: Whether to exclude soft-deleted facts.
             project: Optional project filter.
+            scope: Scope filter (default: ``'canonical'``).
+            source_harness: Optional source harness filter.
+            source_agent: Optional source agent filter.
+            source_kind: Optional source kind filter.
 
         Returns:
             List of scored result dicts, deduplicated.
@@ -480,7 +521,9 @@ class EtchRetriever:
         all_sets: list[list[dict]] = []
 
         # Depth 0: full query as-is
-        depth0 = self._fts_candidates(query, limit * 2, exclude_deleted, project)
+        depth0 = self._fts_candidates(query, limit * 2, exclude_deleted, project,
+                                      scope=scope, source_harness=source_harness,
+                                      source_agent=source_agent, source_kind=source_kind)
         if depth0:
             scored0 = self._score_candidates(query, depth0)
             scored0.sort(key=lambda x: x.get("_score", 0), reverse=True)
@@ -500,7 +543,9 @@ class EtchRetriever:
         keywords = _extract_keywords(query)
         if keywords:
             or_query = " OR ".join(keywords)
-            depth1 = self._fts_candidates(or_query, limit * 2, exclude_deleted, project)
+            depth1 = self._fts_candidates(or_query, limit * 2, exclude_deleted, project,
+                                          scope=scope, source_harness=source_harness,
+                                          source_agent=source_agent, source_kind=source_kind)
             if depth1:
                 scored1 = self._score_candidates(or_query, depth1)
                 scored1.sort(key=lambda x: x.get("_score", 0), reverse=True)
@@ -517,7 +562,9 @@ class EtchRetriever:
         # Depth 2: single keyword searches, union
         if keywords:
             for kw in keywords:
-                kw_set = self._fts_candidates(kw, limit * 2, exclude_deleted, project)
+                kw_set = self._fts_candidates(kw, limit * 2, exclude_deleted, project,
+                                              scope=scope, source_harness=source_harness,
+                                              source_agent=source_agent, source_kind=source_kind)
                 if kw_set:
                     scored_kw = self._score_candidates(kw, kw_set)
                     scored_kw.sort(key=lambda x: x.get("_score", 0), reverse=True)
@@ -561,6 +608,10 @@ class EtchRetriever:
         limit: int = 10,
         exclude_deleted: bool = True,
         project: str = "",
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
         """Multi-query HRR search with parallel query variations.
 
@@ -576,6 +627,10 @@ class EtchRetriever:
             limit: Max results.
             exclude_deleted: Whether to exclude soft-deleted facts.
             project: Optional project filter.
+            scope: Scope filter (default: ``'canonical'``).
+            source_harness: Optional source harness filter.
+            source_agent: Optional source agent filter.
+            source_kind: Optional source kind filter.
 
         Returns:
             Merged list of scored result dicts.
@@ -590,7 +645,9 @@ class EtchRetriever:
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         def _search_variation(var: str) -> list[dict]:
-            candidates = self._fts_candidates(var, limit * 2, exclude_deleted, project)
+            candidates = self._fts_candidates(var, limit * 2, exclude_deleted, project,
+                                              scope=scope, source_harness=source_harness,
+                                              source_agent=source_agent, source_kind=source_kind)
             if not candidates:
                 return []
             scored = self._score_candidates(var, candidates)
@@ -630,6 +687,10 @@ class EtchRetriever:
         exclude_deleted: bool = True,
         project: str = "",
         fallback_thresholds: Optional[list[int]] = None,
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
         """RRF-fused search across ALL available streams.
 
@@ -649,6 +710,10 @@ class EtchRetriever:
             project: Optional project filter.
             fallback_thresholds: Ignored (kept for backward compat).
                 All streams always contribute.
+            scope: Scope filter (default: ``'canonical'``).
+            source_harness: Optional source harness filter.
+            source_agent: Optional source agent filter.
+            source_kind: Optional source kind filter.
 
         Returns:
             List of scored result dicts.
@@ -661,6 +726,8 @@ class EtchRetriever:
         try:
             level1 = self.search_expanded(
                 query, limit, exclude_deleted=exclude_deleted, project=project,
+                scope=scope, source_harness=source_harness,
+                source_agent=source_agent, source_kind=source_kind,
             )
             if level1:
                 streams.append(level1)
@@ -671,6 +738,8 @@ class EtchRetriever:
         try:
             level2 = self._hrr_multi_query(
                 query, limit, exclude_deleted=exclude_deleted, project=project,
+                scope=scope, source_harness=source_harness,
+                source_agent=source_agent, source_kind=source_kind,
             )
             if level2:
                 streams.append(level2)
@@ -686,6 +755,8 @@ class EtchRetriever:
                     vec_bytes = struct.pack(f"{len(q_vec)}f", *q_vec)
                     embedding_results = self._store.search_by_vector(
                         vec_bytes, limit=limit, project=project,
+                        scope=scope, source_harness=source_harness,
+                        source_agent=source_agent, source_kind=source_kind,
                     )
                     if embedding_results:
                         for r in embedding_results:
@@ -700,7 +771,16 @@ class EtchRetriever:
                 r.setdefault("score", r["_score"])
         return merged[:limit]
 
-    def probe(self, topic: str, limit: int = 10, project: str = "") -> list[dict]:
+    def probe(
+        self,
+        topic: str,
+        limit: int = 10,
+        project: str = "",
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
+    ) -> list[dict]:
         """Search by topic tag or content keyword.
 
         Matches facts where the tag or content contains *topic*.
@@ -709,6 +789,10 @@ class EtchRetriever:
             topic: Keyword to search for in tags and content.
             limit: Max results (default: 10).
             project: Optional project filter.
+            scope: Scope filter (default: ``'canonical'``).
+            source_harness: Optional source harness filter.
+            source_agent: Optional source agent filter.
+            source_kind: Optional source kind filter.
 
         Returns:
             List of fact dicts with a ``_score`` key.
@@ -719,6 +803,18 @@ class EtchRetriever:
             if project:
                 conditions.append("f.project = ?")
                 params.append(project)
+            if scope:
+                conditions.append("f.scope = ?")
+                params.append(scope)
+            if source_harness:
+                conditions.append("f.source_harness = ?")
+                params.append(source_harness)
+            if source_agent:
+                conditions.append("f.source_agent = ?")
+                params.append(source_agent)
+            if source_kind:
+                conditions.append("f.source_kind = ?")
+                params.append(source_kind)
             conditions.append("(f.tags LIKE ? OR f.content LIKE ?)")
             params.extend([f"%{topic}%", f"%{topic}%"])
             w = " AND ".join(conditions)
@@ -734,7 +830,15 @@ class EtchRetriever:
             r["_score"] = r.get("trust_score", 0.5)
         return results
 
-    def related(self, topic: str, limit: int = 10) -> list[dict]:
+    def related(
+        self,
+        topic: str,
+        limit: int = 10,
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
+    ) -> list[dict]:
         """Find facts related to a topic via entities + FTS5.
 
         Searches for facts that share entities with the given topic,
@@ -743,6 +847,10 @@ class EtchRetriever:
         Args:
             topic: Topic keyword to search related facts for.
             limit: Max results (default: 10).
+            scope: Scope filter (default: ``'canonical'``).
+            source_harness: Optional source harness filter.
+            source_agent: Optional source agent filter.
+            source_kind: Optional source kind filter.
 
         Returns:
             List of fact dicts related to the topic.
@@ -757,30 +865,60 @@ class EtchRetriever:
 
             if entity_ids:
                 placeholders = ",".join("?" * len(entity_ids))
+                base_conditions = ["(f.deleted IS NULL OR f.deleted = 0)"]
+                base_params: list = []
+                if scope:
+                    base_conditions.append("f.scope = ?")
+                    base_params.append(scope)
+                if source_harness:
+                    base_conditions.append("f.source_harness = ?")
+                    base_params.append(source_harness)
+                if source_agent:
+                    base_conditions.append("f.source_agent = ?")
+                    base_params.append(source_agent)
+                if source_kind:
+                    base_conditions.append("f.source_kind = ?")
+                    base_params.append(source_kind)
+                base_where = " AND ".join(base_conditions)
                 rows = self._store._conn.execute(
                     f"""SELECT DISTINCT f.fact_id, f.content, f.category, f.tags, f.trust_score,
                                f.project, f.created_at, f.session_id
                         FROM facts f
                         JOIN fact_entities fe ON fe.fact_id = f.fact_id
                         WHERE fe.entity_id IN ({placeholders})
-                          AND (f.deleted IS NULL OR f.deleted = 0)
+                          AND {base_where}
                         ORDER BY f.trust_score DESC
                         LIMIT ?""",
-                    entity_ids + [limit],
+                    base_params + entity_ids + [limit],
                 ).fetchall()
             else:
                 # Fallback: FTS5 search on topic
                 try:
+                    fts_params: list = [topic]
+                    fts_conditions: list[str] = ["(f.deleted IS NULL OR f.deleted = 0)"]
+                    if scope:
+                        fts_conditions.append("f.scope = ?")
+                        fts_params.append(scope)
+                    if source_harness:
+                        fts_conditions.append("f.source_harness = ?")
+                        fts_params.append(source_harness)
+                    if source_agent:
+                        fts_conditions.append("f.source_agent = ?")
+                        fts_params.append(source_agent)
+                    if source_kind:
+                        fts_conditions.append("f.source_kind = ?")
+                        fts_params.append(source_kind)
+                    fts_where = " AND ".join(fts_conditions)
                     rows = self._store._conn.execute(
-                        """SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score,
+                        f"""SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score,
                                   f.project, f.created_at, f.session_id
                            FROM facts f
                            JOIN facts_fts fts ON fts.rowid = f.fact_id
                            WHERE facts_fts MATCH ?
-                             AND (f.deleted IS NULL OR f.deleted = 0)
+                             AND {fts_where}
                            ORDER BY fts.rank
                            LIMIT ?""",
-                        (topic, limit),
+                        fts_params + [limit],
                     ).fetchall()
                 except Exception:
                     rows = []

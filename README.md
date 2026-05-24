@@ -236,6 +236,48 @@ Configuración vía `MEMORY_ETCH_DB_PATH` (default: `memory.db` en el CWD).
 
 ---
 
+## Hive Memory (v1.1)
+
+Provenance-aware facts with governed scopes and an inbox review lifecycle. Every fact can carry source identity (`source_harness`, `source_agent`, `source_kind`) and a scope that controls discoverability.
+
+### Scopes
+
+| Scope | Default search | Use case |
+|-------|---------------|----------|
+| `canonical` | ✅ Included | Trusted project memory |
+| `inbox` | ❌ Excluded | Untrusted / subagent writes awaiting review |
+| `personal` | ❌ Excluded | Private user facts |
+| `ephemeral` | ❌ Excluded | Transient data |
+
+**Provenance example:**
+
+```python
+store.add_fact(
+    "FastMCP retries on timeout",
+    source_harness="opencode",
+    source_agent="worker-1",
+    source_kind="manual",
+    scope="canonical",
+)
+```
+
+### Inbox workflow
+
+```python
+# List pending inbox facts
+inbox = store.list_inbox(project="my-project", limit=20)
+
+# Promote to canonical (becomes searchable)
+store.promote_fact(inbox[0]["fact_id"])
+
+# Reject (soft-deleted, hidden from default search)
+store.reject_fact(inbox[3]["fact_id"], reason="low quality")
+```
+
+No new dependencies. Works with existing `add_fact` callers — provenance args are optional, scope defaults to `canonical`. See [`docs/api/store.md`](docs/api/store.md) for the full API.
+
+---
+
 ## Benchmark
 
 Benchmark integrado para medir recall@k con dataset sintético y juez Gemini:

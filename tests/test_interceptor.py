@@ -119,6 +119,53 @@ class TestInterceptReturnsHandles:
 # ---------------------------------------------------------------------------
 
 
+class TestGenericInterceptorMetadata:
+    """GenericInterceptor passes provenance metadata to add_fact."""
+
+    def test_generic_forwards_source_harness(self):
+        """GenericInterceptor passes source_harness='interceptor' and source_kind='conversation'."""
+        store = MagicMock(spec=EtchStore)
+        store.add_fact.return_value = 1
+
+        def fake_llm(messages, **kwargs):
+            return "Assistant response text"
+
+        from memory_etch.interceptor.generic import GenericInterceptor
+
+        interceptor = GenericInterceptor(store, fake_llm)
+        wrapped = interceptor.wrap()
+        wrapped(messages=[{"role": "user", "content": "Hello"}])
+
+        for call in store.add_fact.call_args_list:
+            kwargs = call.kwargs
+            assert kwargs.get("source_harness") == "interceptor"
+            assert kwargs.get("source_kind") == "conversation"
+
+    def test_generic_does_not_break_existing_behavior(self):
+        """Adding provenance metadata does not break existing behavior."""
+        store = MagicMock(spec=EtchStore)
+        store.add_fact.return_value = 1
+
+        def fake_llm(messages, **kwargs):
+            return "Response"
+
+        from memory_etch.interceptor.generic import GenericInterceptor
+
+        interceptor = GenericInterceptor(store, fake_llm)
+        wrapped = interceptor.wrap()
+        result = wrapped(messages=[{"role": "user", "content": "Hello"}])
+
+        assert result == "Response"
+        assert store.add_fact.call_count == 2
+
+        # All other existing fields still present
+        user_call = store.add_fact.call_args_list[0].kwargs
+        assert user_call["category"] == "conversation"
+        assert user_call["content"] == "user: Hello"
+        assert "role:user" in user_call["tags"]
+        assert user_call["trust_score"] == 0.9
+
+
 class TestGenericInterceptorWrap:
     """GenericInterceptor.wrap() captures 2 facts per call."""
 
@@ -706,6 +753,162 @@ class TestAnthropicWrapper:
 
         restored_id = id(fake_module.Anthropic.messages.create)
         assert restored_id == original_id
+
+
+class TestOpenAIMetadata:
+    """OpenAI interceptor passes provenance metadata."""
+
+    def test_openai_passes_source_harness_and_kind(self, etch_store):
+        """OpenAI interceptor passes source_harness='openai' and source_kind='conversation'."""
+        completion = _make_mock_chat_completion("Response from GPT")
+
+        fake_module = _make_fake_openai_module()[0]
+        mock_create = fake_module.OpenAI.chat.completions.create
+        mock_create.return_value = completion
+
+        with patch.dict("sys.modules", {"openai": fake_module}):
+            from memory_etch.interceptor import intercept, teardown_all
+
+            handles = intercept(etch_store, targets=["openai"])
+            try:
+                import openai
+                openai.OpenAI.chat.completions.create(
+                    model="gpt-4",
+                    messages=[{"role": "user", "content": "Hello"}],
+                )
+            finally:
+                teardown_all(handles)
+
+        facts = etch_store.list_facts()
+        for f in facts:
+            assert f["source_harness"] == "openai", f"Expected 'openai', got '{f['source_harness']}'"
+            assert f["source_kind"] == "conversation", f"Expected 'conversation', got '{f['source_kind']}'"
+
+    def test_openai_passes_model_as_source_agent(self, etch_store):
+        """OpenAI interceptor passes model name as source_agent."""
+        completion = _make_mock_chat_completion("Response from GPT")
+
+        fake_module = _make_fake_openai_module()[0]
+        mock_create = fake_module.OpenAI.chat.completions.create
+        mock_create.return_value = completion
+
+        with patch.dict("sys.modules", {"openai": fake_module}):
+            from memory_etch.interceptor import intercept, teardown_all
+
+            handles = intercept(etch_store, targets=["openai"])
+            try:
+                import openai
+                openai.OpenAI.chat.completions.create(
+                    model="gpt-4-turbo",
+                    messages=[{"role": "user", "content": "Hi"}],
+                )
+            finally:
+                teardown_all(handles)
+
+        facts = etch_store.list_facts()
+        for f in facts:
+            assert f["source_agent"] == "gpt-4-turbo", f"Expected 'gpt-4-turbo', got '{f['source_agent']}'"
+
+
+class TestAnthropicMetadata:
+    """Anthropic interceptor passes provenance metadata."""
+
+    def test_anthropic_passes_source_harness_and_kind(self, etch_store):
+        """Anthropic interceptor passes source_harness='anthropic' and source_kind='conversation'."""
+        message = _make_mock_anthropic_message("Response from Claude")
+
+        fake_module = _make_fake_anthropic_module()[0]
+        mock_create = fake_module.Anthropic.messages.create
+        mock_create.return_value = message
+
+        with patch.dict("sys.modules", {"anthropic": fake_module}):
+            from memory_etch.interceptor import intercept, teardown_all
+
+            handles = intercept(etch_store, targets=["anthropic"])
+            try:
+                import anthropic
+                anthropic.Anthropic.messages.create(
+                    model="claude-3-opus",
+                    messages=[{"role": "user", "content": "Hello Claude"}],
+                )
+            finally:
+                teardown_all(handles)
+
+        facts = etch_store.list_facts()
+        for f in facts:
+            assert f["source_harness"] == "anthropic", f"Expected 'anthropic', got '{f['source_harness']}'"
+            assert f["source_kind"] == "conversation", f"Expected 'conversation', got '{f['source_kind']}'"
+
+    def test_anthropic_passes_model_as_source_agent(self, etch_store):
+        """Anthropic interceptor passes model name as source_agent."""
+        message = _make_mock_anthropic_message("Response")
+
+        fake_module = _make_fake_anthropic_module()[0]
+        mock_create = fake_module.Anthropic.messages.create
+        mock_create.return_value = message
+
+        with patch.dict("sys.modules", {"anthropic": fake_module}):
+            from memory_etch.interceptor import intercept, teardown_all
+
+            handles = intercept(etch_store, targets=["anthropic"])
+            try:
+                import anthropic
+                anthropic.Anthropic.messages.create(
+                    model="claude-3-5-sonnet",
+                    messages=[{"role": "user", "content": "Hi"}],
+                )
+            finally:
+                teardown_all(handles)
+
+        facts = etch_store.list_facts()
+        for f in facts:
+            assert f["source_agent"] == "claude-3-5-sonnet", f"Expected 'claude-3-5-sonnet', got '{f['source_agent']}'"
+
+
+class TestExtractMetadata:
+    """extract_conversation passes provenance metadata."""
+
+    def test_extract_passes_source_harness_and_kind(self):
+        """extract_conversation passes interceptor metadata to add_fact."""
+        store = MagicMock(spec=EtchStore)
+        store.add_fact.return_value = 1
+
+        conversation = [
+            {"content": "user: Hello", "role": "user"},
+            {"content": "assistant: Hi there!", "role": "assistant"},
+        ]
+
+        def llm_extract_fn(text):
+            return ["User likes Python"]
+
+        from memory_etch.interceptor.extract import extract_conversation
+
+        extract_conversation(conversation, store, llm_extract_fn)
+
+        call_kwargs = store.add_fact.call_args.kwargs
+        assert call_kwargs.get("source_harness") == "interceptor"
+        assert call_kwargs.get("source_kind") == "conversation"
+
+    def test_extract_without_breaking_existing_fields(self):
+        """Adding metadata preserves existing fields in extract."""
+        store = MagicMock(spec=EtchStore)
+        store.add_fact.return_value = 1
+
+        conversation = [
+            {"content": "user: Hello", "role": "user"},
+        ]
+
+        def llm_extract_fn(text):
+            return ["New fact"]
+
+        from memory_etch.interceptor.extract import extract_conversation
+
+        extract_conversation(conversation, store, llm_extract_fn)
+
+        call_kwargs = store.add_fact.call_args.kwargs
+        assert call_kwargs["category"] == "extracted"
+        assert "interceptor" in call_kwargs["tags"]
+        assert call_kwargs["trust_score"] == 0.9
 
 
 # ---------------------------------------------------------------------------

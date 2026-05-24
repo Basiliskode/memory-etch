@@ -78,6 +78,8 @@ class GenericInterceptor:
                     topic_key=f"conversation/{conv_id}/t{_turn_counter:04d}/user",
                     trust_score=0.9,
                     importance=0.5,
+                    source_harness="interceptor",
+                    source_kind="conversation",
                 )
 
             # 2. Call original
@@ -92,6 +94,8 @@ class GenericInterceptor:
                     topic_key=f"conversation/{conv_id}/t{_turn_counter:04d}/assistant",
                     trust_score=0.9,
                     importance=0.5,
+                    source_harness="interceptor",
+                    source_kind="conversation",
                 )
 
             return result

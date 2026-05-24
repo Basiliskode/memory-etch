@@ -1,6 +1,6 @@
 """FastMCP stdio server for Memory Etch.
 
-Exposes ``EtchStore`` as 6 MCP tools:
+Exposes ``EtchStore`` as 9 MCP tools:
 
 - ``add_fact``
 - ``search_facts``
@@ -8,6 +8,9 @@ Exposes ``EtchStore`` as 6 MCP tools:
 - ``delete_fact``
 - ``get_timeline``
 - ``search_similar``
+- ``list_inbox``
+- ``promote_fact``
+- ``reject_fact``
 
 The store is a module-level singleton initialized from the
 ``MEMORY_ETCH_DB_PATH`` environment variable.
@@ -72,6 +75,10 @@ def add_fact(
     topic_key: Optional[str] = None,
     source: Optional[str] = None,
     metadata: Optional[str] = None,
+    source_harness: Optional[str] = None,
+    source_agent: Optional[str] = None,
+    source_kind: Optional[str] = None,
+    scope: Optional[str] = None,
 ) -> str:
     """Add a fact to the memory store.
 
@@ -82,6 +89,10 @@ def add_fact(
         topic_key: Optional topic key for upsert behavior.
         source: Optional source description (stored in ``what`` field).
         metadata: Optional JSON metadata string (stored in ``learned`` field).
+        source_harness: Optional source harness identifier.
+        source_agent: Optional source agent identifier.
+        source_kind: Optional source kind (e.g. "provider", "conversation").
+        scope: Optional fact scope (default: "canonical").
 
     Returns:
         JSON string with ``{"id": int, "status": "created"|"updated"}``.
@@ -89,7 +100,7 @@ def add_fact(
     store = get_store()
     what_text = source or ""
     learned_text = metadata or ""
-    fid = store.add_fact(
+    kwargs = dict(
         content=content,
         project=project or "",
         session_id=session_id or "",
@@ -97,6 +108,15 @@ def add_fact(
         what=what_text,
         learned=learned_text,
     )
+    if source_harness is not None:
+        kwargs["source_harness"] = source_harness
+    if source_agent is not None:
+        kwargs["source_agent"] = source_agent
+    if source_kind is not None:
+        kwargs["source_kind"] = source_kind
+    if scope is not None:
+        kwargs["scope"] = scope
+    fid = store.add_fact(**kwargs)
     # Determine status: if topic_key was provided and content differs → "updated"
     status = "updated" if (topic_key and store.get_fact(fid) and store.get_fact(fid)["content"] == content) else "created"  # noqa: E501
     # Simpler: always "created" unless we can detect upsert.  Use revision_count.
@@ -112,6 +132,10 @@ def search_facts(
     limit: int = 10,
     project: Optional[str] = None,
     mode: str = "auto",
+    scope: Optional[str] = None,
+    source_harness: Optional[str] = None,
+    source_agent: Optional[str] = None,
+    source_kind: Optional[str] = None,
 ) -> str:
     """Search facts by full-text query.
 
@@ -120,13 +144,23 @@ def search_facts(
         limit: Max results (default: 10).
         project: Optional project filter.
         mode: Search mode (default: "auto").
+        scope: Optional scope filter (default: "canonical").
+        source_harness: Optional source harness filter.
+        source_agent: Optional source agent filter.
+        source_kind: Optional source kind filter.
 
     Returns:
         JSON array of fact dicts with ``id``, ``content``, ``score``,
         ``project``, ``summary`` keys.
     """
     store = get_store()
-    results = store.search_facts(query=query, limit=limit, project=project or "")
+    results = store.search_facts(
+        query=query, limit=limit, project=project or "",
+        scope=scope or "canonical",
+        source_harness=source_harness or "",
+        source_agent=source_agent or "",
+        source_kind=source_kind or "",
+    )
     output = []
     for r in results:
         content = r.get("content", "")
@@ -226,3 +260,77 @@ def search_similar(query: str, limit: int = 5) -> str:
             "summary": content[:200] if content else "",
         })
     return json.dumps(output, default=str)
+
+
+@server.tool()
+def list_inbox(
+    project: Optional[str] = None,
+    source_harness: Optional[str] = None,
+    limit: int = 50,
+) -> str:
+    """List inbox facts for review.
+
+    Returns non-deleted facts where ``scope='inbox'``, optionally
+    filtered by project and/or source_harness.
+
+    Args:
+        project: Optional project filter.
+        source_harness: Optional source harness filter.
+        limit: Max results (default: 50).
+
+    Returns:
+        JSON array of fact dicts.
+    """
+    store = get_store()
+    results = store.list_inbox(
+        project=project or "",
+        source_harness=source_harness or "",
+        limit=limit,
+    )
+    output = []
+    for r in results:
+        d = dict(r)
+        d.pop("hrr_vector", None)
+        d.pop("embedding", None)
+        output.append(d)
+    return json.dumps(output, default=str)
+
+
+@server.tool()
+def promote_fact(fact_id: int) -> str:
+    """Promote an inbox fact to canonical scope.
+
+    Changes ``scope`` from ``'inbox'`` to ``'canonical'`` and updates
+    the timestamp. Only affects facts where ``scope='inbox'`` and not
+    already deleted.
+
+    Args:
+        fact_id: ID of the inbox fact to promote.
+
+    Returns:
+        JSON string with ``{"status": "promoted"|"not_found"}``.
+    """
+    store = get_store()
+    ok = store.promote_fact(fact_id)
+    status = "promoted" if ok else "not_found"
+    return json.dumps({"status": status})
+
+
+@server.tool()
+def reject_fact(fact_id: int, reason: str = "") -> str:
+    """Reject an inbox fact (soft-delete with reason).
+
+    Soft-deletes the fact and stores the rejection reason. Only affects
+    non-deleted inbox facts.
+
+    Args:
+        fact_id: ID of the inbox fact to reject.
+        reason: Optional rejection reason (default: "").
+
+    Returns:
+        JSON string with ``{"status": "rejected"|"not_found"}``.
+    """
+    store = get_store()
+    ok = store.reject_fact(fact_id, reason=reason)
+    status = "rejected" if ok else "not_found"
+    return json.dumps({"status": status})

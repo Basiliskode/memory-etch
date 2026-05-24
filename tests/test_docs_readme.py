@@ -90,6 +90,17 @@ def test_api_classifier_md_exists():
     assert "def classify" in text, "classifier.md missing classify method signature"
 
 
+def test_readme_has_hive_memory_section():
+    """README documents Hive Memory provenance, scopes, and inbox workflow."""
+    text = README.read_text(encoding="utf-8")
+    assert "Hive Memory" in text, "Hive Memory section missing"
+    assert "source_harness" in text, "Provenance docs missing"
+    assert "inbox" in text.lower(), "Inbox workflow docs missing"
+    assert "promote_fact" in text, "promote_fact documented"
+    assert "reject_fact" in text, "reject_fact documented"
+    assert "scope" in text, "Scope docs missing"
+
+
 def test_help_etchstore_runs():
     """`from memory_etch import EtchStore; help(EtchStore)` runs without error."""
     import importlib

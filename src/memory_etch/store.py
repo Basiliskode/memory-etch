@@ -30,6 +30,9 @@ from .project import detect_project
 
 logger = logging.getLogger(__name__)
 
+# Valid scopes for Hive Memory governance
+VALID_SCOPES: set[str] = {"canonical", "inbox", "personal", "ephemeral"}
+
 
 def _sanitize_fts5(query: str) -> str:
     """Strip FTS5-unsafe characters from a natural-language query.
@@ -373,6 +376,17 @@ class EtchStore:
                 "ALTER TABLE facts ADD COLUMN last_retrieved_at TIMESTAMP"
             )
 
+        # Hive Memory v1 provenance and scope columns
+        for col, type_def in [
+            ("source_harness", "TEXT DEFAULT ''"),
+            ("source_agent", "TEXT DEFAULT ''"),
+            ("source_kind", "TEXT DEFAULT ''"),
+            ("scope", "TEXT DEFAULT 'canonical'"),
+        ]:
+            if col not in cols:
+                logger.info("Migrating schema: adding column %s", col)
+                self._conn.execute(f"ALTER TABLE facts ADD COLUMN {col} {type_def}")
+
         # Index for eviction queries
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_facts_last_retrieved "
@@ -509,11 +523,21 @@ class EtchStore:
         except Exception:
             logger.exception("Embedding computation failed for fact %d", fact_id)
 
-    def _search_by_embedding(self, query_emb: list[float], k: int) -> list[int]:
+    def _search_by_embedding(
+        self,
+        query_emb: list[float],
+        k: int,
+        scope: str = "",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
+    ) -> list[int]:
         """Search facts by embedding vector similarity (dot product).
 
         Loads stored BLOBs as float32 ndarray, L2-normalizes, computes
         dot product with query vector, returns top-k fact IDs.
+
+        Supports optional scope and source filtering.
 
         Returns empty list if numpy is unavailable or no embeddings exist.
         """
@@ -523,10 +547,21 @@ class EtchStore:
             return []
 
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT fact_id, embedding FROM facts "
-                "WHERE embedding IS NOT NULL AND (deleted IS NULL OR deleted = 0)"
-            ).fetchall()
+            sql = "SELECT fact_id, embedding FROM facts WHERE embedding IS NOT NULL AND (deleted IS NULL OR deleted = 0)"
+            params: list = []
+            if scope:
+                sql += " AND scope = ?"
+                params.append(scope)
+            if source_harness:
+                sql += " AND source_harness = ?"
+                params.append(source_harness)
+            if source_agent:
+                sql += " AND source_agent = ?"
+                params.append(source_agent)
+            if source_kind:
+                sql += " AND source_kind = ?"
+                params.append(source_kind)
+            rows = self._conn.execute(sql, params).fetchall()
 
         if not rows:
             return []
@@ -591,6 +626,10 @@ class EtchStore:
         where_text: Optional[str] = None,
         learned: Optional[str] = None,
         return_metadata: bool = False,
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
+        scope: str = "canonical",
     ) -> int | dict:
         """Insert a new fact.
 
@@ -632,6 +671,12 @@ class EtchStore:
             trust_score = 0.5
         if importance is None:
             importance = 0.5
+
+        # Hive Memory scope validation
+        if scope not in VALID_SCOPES:
+            raise ValueError(
+                f"Invalid scope: '{scope}'. Must be one of: {', '.join(sorted(VALID_SCOPES))}"
+            )
 
         # SHA-256 content hash for 60s rolling-window dedup
         content_hash = hashlib.sha256(
@@ -691,12 +736,15 @@ class EtchStore:
                            what = COALESCE(?, what), why = COALESCE(?, why),
                            where_text = COALESCE(?, where_text),
                            learned = COALESCE(?, learned),
-                           content_hash = ?
+                           content_hash = ?,
+                           source_harness = ?, source_agent = ?, source_kind = ?, scope = ?
                         WHERE fact_id = ?""",
                         (content, category, tags, trust_score, importance,
                          project, session_id, embedding,
                          what_val, why_val, where_val, learned_val,
-                         content_hash, eid),
+                         content_hash,
+                         source_harness, source_agent, source_kind, scope,
+                         eid),
                     )
                     self._conn.commit()
                     self._invalidate_hrr_cache(eid)
@@ -723,12 +771,15 @@ class EtchStore:
                     """INSERT OR IGNORE INTO facts
                        (content, category, tags, trust_score, importance,
                         project, session_id, topic_key, embedding,
-                        what, why, where_text, learned, content_hash)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        what, why, where_text, learned, content_hash,
+                        source_harness, source_agent, source_kind, scope)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                               ?, ?, ?, ?)""",
                     (content, category, tags, trust_score, importance,
                      project, session_id, topic_key, embedding,
                      what_val or "", why_val or "", where_val or "",
-                     learned_val or "", content_hash),
+                     learned_val or "", content_hash,
+                     source_harness, source_agent, source_kind, scope),
                 )
                 self._conn.commit()
                 row = self._conn.execute(
@@ -980,6 +1031,105 @@ class EtchStore:
             self._invalidate_hrr_cache(fact_id)
         return cur.rowcount > 0
 
+    # ------------------------------------------------------------------
+    # Hive Memory v1 — Inbox workflow
+    # ------------------------------------------------------------------
+
+    def list_inbox(
+        self,
+        project: str = "",
+        source_harness: str = "",
+        limit: int = 50,
+    ) -> list[dict]:
+        """List inbox facts (scope='inbox') for review.
+
+        Returns non-deleted facts where ``scope='inbox'``, filtered by
+        project and/or source_harness if provided, newest first.
+
+        Args:
+            project: Optional project filter.
+            source_harness: Optional source harness filter.
+            limit: Max results (default: 50).
+
+        Returns:
+            List of fact dicts.
+        """
+        with self._lock:
+            conditions = [
+                "(f.deleted IS NULL OR f.deleted = 0)",
+                "f.scope = 'inbox'",
+            ]
+            params: list = []
+            if project:
+                conditions.append("f.project = ?")
+                params.append(project)
+            if source_harness:
+                conditions.append("f.source_harness = ?")
+                params.append(source_harness)
+            w = " AND ".join(conditions)
+            rows = self._conn.execute(
+                f"""SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score,
+                           f.created_at, f.updated_at, f.project, f.topic_key,
+                           f.revision_count, f.importance, f.session_id,
+                           f.source_harness, f.source_agent, f.source_kind, f.scope,
+                           f.deleted, f.deleted_reason
+                    FROM facts f
+                    WHERE {w}
+                    ORDER BY f.fact_id DESC
+                    LIMIT ?""",
+                params + [limit],
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def promote_fact(self, fact_id: int) -> bool:
+        """Promote an inbox fact to canonical scope.
+
+        Changes ``scope`` from ``'inbox'`` to ``'canonical'`` and updates
+        the timestamp. Only affects facts where ``scope='inbox'`` and
+        ``(deleted IS NULL OR deleted = 0)``.
+
+        Args:
+            fact_id: ID of the inbox fact to promote.
+
+        Returns:
+            True if the fact was promoted, False if no matching inbox fact.
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                """UPDATE facts SET scope = 'canonical', updated_at = CURRENT_TIMESTAMP
+                   WHERE fact_id = ? AND scope = 'inbox'
+                   AND (deleted IS NULL OR deleted = 0)""",
+                (fact_id,),
+            )
+            self._conn.commit()
+            self._invalidate_hrr_cache(fact_id)
+        return cur.rowcount > 0
+
+    def reject_fact(self, fact_id: int, reason: str = "") -> bool:
+        """Reject (soft-delete) an inbox fact.
+
+        Soft-deletes the fact and stores the rejection reason in
+        ``deleted_reason``. Only affects non-deleted inbox facts.
+
+        Args:
+            fact_id: ID of the inbox fact to reject.
+            reason: Optional rejection reason (default: "").
+
+        Returns:
+            True if the fact was rejected, False if no matching inbox fact.
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                """UPDATE facts SET deleted = 1, deleted_reason = ?,
+                       updated_at = CURRENT_TIMESTAMP
+                   WHERE fact_id = ? AND scope = 'inbox'
+                   AND (deleted IS NULL OR deleted = 0)""",
+                (reason, fact_id),
+            )
+            self._conn.commit()
+            self._invalidate_hrr_cache(fact_id)
+        return cur.rowcount > 0
+
     def purge_facts(self, dry_run: bool = True) -> dict:
         """Purge low-value facts: >90d old, low trust <0.3, low importance <0.5.
 
@@ -1094,23 +1244,46 @@ class EtchStore:
         query: str,
         limit: int = 10,
         exclude_deleted: bool = True,
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
         """Full-text search via FTS5.
+
+        Default scope is ``'canonical'`` — only canonical facts are returned
+        unless an explicit scope is requested.
 
         """
         with self._lock:
             try:
                 sql = """SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score,
                                 f.created_at, f.updated_at, f.project, f.topic_key, f.revision_count,
-                                f.importance, f.session_id
+                                f.importance, f.session_id,
+                                f.source_harness, f.source_agent, f.source_kind, f.scope
                          FROM facts f
                          JOIN facts_fts fts ON fts.rowid = f.fact_id
-                         WHERE facts_fts MATCH ?
-                         ORDER BY fts.rank
-                         LIMIT ?"""
-                params: list = [query, limit]
+                         WHERE facts_fts MATCH ?"""
+                params: list = [query]
+                conditions: list[str] = []
                 if exclude_deleted:
-                    sql = sql.replace("WHERE", "WHERE (f.deleted IS NULL OR f.deleted = 0) AND")
+                    conditions.append("(f.deleted IS NULL OR f.deleted = 0)")
+                if scope:
+                    conditions.append("f.scope = ?")
+                    params.append(scope)
+                if source_harness:
+                    conditions.append("f.source_harness = ?")
+                    params.append(source_harness)
+                if source_agent:
+                    conditions.append("f.source_agent = ?")
+                    params.append(source_agent)
+                if source_kind:
+                    conditions.append("f.source_kind = ?")
+                    params.append(source_kind)
+                if conditions:
+                    sql += " AND " + " AND ".join(conditions)
+                sql += " ORDER BY fts.rank LIMIT ?"
+                params.append(limit)
                 rows = self._conn.execute(sql, params).fetchall()
                 return [dict(r) for r in rows]
             except Exception:
@@ -1123,6 +1296,10 @@ class EtchStore:
         where_text: Optional[str] = None,
         learned: Optional[str] = None,
         limit: int = 10,
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
         """Search facts by structured metadata fields.
 
@@ -1136,6 +1313,10 @@ class EtchStore:
             where_text: Filter by ``where_text`` field (partial match).
             learned: Filter by ``learned`` field (partial match).
             limit: Max results (default: 10).
+            scope: Scope filter (default: ``'canonical'``).
+            source_harness: Optional source harness filter.
+            source_agent: Optional source agent filter.
+            source_kind: Optional source kind filter.
 
         Returns:
             List of fact dicts matching all provided filters.
@@ -1155,12 +1336,26 @@ class EtchStore:
                 conditions.append(f"f.{col} LIKE ?")
                 params.append(f"%{val}%")
 
+        if scope:
+            conditions.append("f.scope = ?")
+            params.append(scope)
+        if source_harness:
+            conditions.append("f.source_harness = ?")
+            params.append(source_harness)
+        if source_agent:
+            conditions.append("f.source_agent = ?")
+            params.append(source_agent)
+        if source_kind:
+            conditions.append("f.source_kind = ?")
+            params.append(source_kind)
+
         with self._lock:
             w = " AND ".join(conditions)
             rows = self._conn.execute(
                 f"SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score, "
                 f"f.created_at, f.updated_at, f.project, f.topic_key, f.revision_count, "
-                f"f.importance, f.session_id, f.what, f.why, f.where_text, f.learned "
+                f"f.importance, f.session_id, f.what, f.why, f.where_text, f.learned, "
+                f"f.source_harness, f.source_agent, f.source_kind, f.scope "
                 f"FROM facts f WHERE {w} ORDER BY f.trust_score DESC LIMIT ?",
                 params + [limit],
             ).fetchall()
@@ -1174,6 +1369,10 @@ class EtchStore:
         min_trust: float = 0.0,
         category: str = "",
         project: str = "",
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
         """Search facts by embedding vector (cosine similarity).
 
@@ -1181,6 +1380,12 @@ class EtchStore:
         float32 arrays and computes cosine similarity in a loop.
 
         Retrieved facts get a small trust boost (retrieval feedback loop).
+
+        Args:
+            scope: Scope filter (default: ``'canonical'``).
+            source_harness: Optional source harness filter.
+            source_agent: Optional source agent filter.
+            source_kind: Optional source kind filter.
 
         Returns list of fact dicts sorted by cosine similarity descending.
         """
@@ -1196,6 +1401,18 @@ class EtchStore:
             if project:
                 conditions.append("f.project = ?")
                 params.append(project)
+            if scope:
+                conditions.append("f.scope = ?")
+                params.append(scope)
+            if source_harness:
+                conditions.append("f.source_harness = ?")
+                params.append(source_harness)
+            if source_agent:
+                conditions.append("f.source_agent = ?")
+                params.append(source_agent)
+            if source_kind:
+                conditions.append("f.source_kind = ?")
+                params.append(source_kind)
 
             w = " AND ".join(conditions)
             rows = self._conn.execute(
@@ -1317,8 +1534,19 @@ class EtchStore:
         project: str = "",
         limit: int = 50,
         offset: int = 0,
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
-        """List facts with optional filters. Returns a flat list of fact dicts."""
+        """List facts with optional filters. Returns a flat list of fact dicts.
+
+        Args:
+            scope: Scope filter (default: ``'canonical'``).
+            source_harness: Optional source harness filter.
+            source_agent: Optional source agent filter.
+            source_kind: Optional source kind filter.
+        """
         with self._lock:
             where = ["(deleted IS NULL OR deleted = 0)"]
             params: list = []
@@ -1328,11 +1556,24 @@ class EtchStore:
             if project:
                 where.append("project = ?")
                 params.append(project)
+            if scope:
+                where.append("scope = ?")
+                params.append(scope)
+            if source_harness:
+                where.append("source_harness = ?")
+                params.append(source_harness)
+            if source_agent:
+                where.append("source_agent = ?")
+                params.append(source_agent)
+            if source_kind:
+                where.append("source_kind = ?")
+                params.append(source_kind)
             w = " AND ".join(where)
 
             rows = self._conn.execute(
                 f"SELECT fact_id, content, category, tags, trust_score, project, "
-                f"created_at, updated_at, topic_key, revision_count, importance, session_id "
+                f"created_at, updated_at, topic_key, revision_count, importance, session_id, "
+                f"source_harness, source_agent, source_kind, scope "
                 f"FROM facts WHERE {w} ORDER BY trust_score DESC LIMIT ? OFFSET ?",
                 params + [limit, offset],
             ).fetchall()
@@ -1742,9 +1983,15 @@ class EtchStore:
         limit: int = 10,
         exclude_deleted: bool = True,
         project: str = "",
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
         """Alias for ``search``."""
-        return self.search(query, limit=limit, exclude_deleted=exclude_deleted, project=project)
+        return self.search(query, limit=limit, exclude_deleted=exclude_deleted, project=project,
+                           scope=scope, source_harness=source_harness, source_agent=source_agent,
+                           source_kind=source_kind)
 
     @staticmethod
     def _rrf_merge(
@@ -1810,6 +2057,10 @@ class EtchStore:
         limit: int = 10,
         exclude_deleted: bool = True,
         project: str = "",
+        scope: str = "canonical",
+        source_harness: str = "",
+        source_agent: str = "",
+        source_kind: str = "",
     ) -> list[dict]:
         """Hybrid search: FTS5 + optional embedding vector search fused via RRF.
 
@@ -1817,11 +2068,19 @@ class EtchStore:
         (non-NoopProvider), the query is embedded and vector search results
         are fused via Reciprocal Rank Fusion.
 
+        Default scope is ``'canonical'`` — only canonical facts are returned
+        unless an explicit scope is requested.
+
         Args:
             query: Search text.
             limit: Max results.
             exclude_deleted: Whether to exclude soft-deleted facts.
             project: Optional project filter.
+            scope: Scope filter (default: ``'canonical'``). Pass ``'inbox'``,
+                ``'personal'``, or ``'ephemeral'`` for other scopes.
+            source_harness: Optional source harness filter.
+            source_agent: Optional source agent filter.
+            source_kind: Optional source kind filter.
 
         Returns list of dicts sorted by combined relevance score (``score`` key).
         """
@@ -1830,7 +2089,8 @@ class EtchStore:
                 safe_query = _sanitize_fts5(query)
                 sql = """SELECT f.fact_id, f.content, f.category, f.tags, f.trust_score,
                                 f.created_at, f.updated_at, f.project, f.topic_key, f.revision_count,
-                                f.importance, f.session_id
+                                f.importance, f.session_id,
+                                f.source_harness, f.source_agent, f.source_kind, f.scope
                          FROM facts f
                          JOIN facts_fts fts ON fts.rowid = f.fact_id
                          WHERE facts_fts MATCH ?"""
@@ -1841,6 +2101,18 @@ class EtchStore:
                 if project:
                     conditions.append("f.project = ?")
                     params.append(project)
+                if scope:
+                    conditions.append("f.scope = ?")
+                    params.append(scope)
+                if source_harness:
+                    conditions.append("f.source_harness = ?")
+                    params.append(source_harness)
+                if source_agent:
+                    conditions.append("f.source_agent = ?")
+                    params.append(source_agent)
+                if source_kind:
+                    conditions.append("f.source_kind = ?")
+                    params.append(source_kind)
                 if conditions:
                     sql += " AND " + " AND ".join(conditions)
                 sql += " ORDER BY fts.rank LIMIT ?"
@@ -1855,7 +2127,10 @@ class EtchStore:
             if not isinstance(self._embedding_provider, NoopProvider):
                 try:
                     q_vec = self._embedding_provider.embed_query(query)
-                    top_ids = self._search_by_embedding(q_vec, k=limit * 2)
+                    top_ids = self._search_by_embedding(q_vec, k=limit * 2, scope=scope,
+                                                        source_harness=source_harness,
+                                                        source_agent=source_agent,
+                                                        source_kind=source_kind)
                     if top_ids:
                             placeholders = ",".join("?" for _ in top_ids)
                             with self._lock:

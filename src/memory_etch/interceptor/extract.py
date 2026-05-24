@@ -59,6 +59,8 @@ def extract_conversation(
             tags="interceptor,extracted",
             trust_score=0.9,
             importance=0.5,
+            source_harness="interceptor",
+            source_kind="conversation",
         )
 
     return len(extracted)
