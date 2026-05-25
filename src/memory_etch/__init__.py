@@ -30,6 +30,7 @@ from .classifier import QueryClassifier
 from .etch import EtchMemoryProvider, _extractor_get_provider_config
 from . import embedding
 from . import hrr
+from . import ingest
 from .embedding import EmbeddingProvider, NoopProvider
 from .interceptor import InterceptorHandle, intercept, teardown_all
 from .interceptor.generic import GenericInterceptor
@@ -44,6 +45,7 @@ __all__ = [
     "EmbeddingProvider",
     "NoopProvider",
     "hrr",
+    "ingest",
     "InterceptorHandle",
     "intercept",
     "teardown_all",

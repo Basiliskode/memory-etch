@@ -74,7 +74,7 @@ def test_ci_workflow_uploads_coverage_artifacts():
     """CI-4: CI uploads coverage reports as an artifact."""
     content = CI_WORKFLOW.read_text(encoding="utf-8")
 
-    assert "actions/upload-artifact@v4" in content
+    assert "actions/upload-artifact@v7" in content
     assert "coverage" in content
     assert "htmlcov" in content
 

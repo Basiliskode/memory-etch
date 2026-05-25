@@ -19,23 +19,23 @@ def _content_hash(content: str, project: str = "") -> str:
 
 
 class TestContentHashDedup:
-    """Task 2.1 — Content hash dedup with 60s rolling window.
+    """Task 2.1 — Content hash dedup (lifetime).
 
     Note: existing UNIQUE(content) constraint still deduplicates exact content
-    globally. The content_hash mechanism adds TIME-BOUNDED dedup and
+    globally. The content_hash mechanism adds LIFETIME dedup and
     duplicate_count tracking. Same content always returns same fact_id
-    (UNIQUE constraint), but duplicate_count only increments when
-    content_hash + project match within 60s.
+    (UNIQUE constraint), and duplicate_count increments whenever
+    content_hash + project match (no time window).
     """
 
-    def test_same_content_within_60s_returns_existing_id(self, store):
-        """Two identical content+project within 60s returns same ID."""
+    def test_same_content_returns_existing_id(self, store):
+        """Two identical content+project returns same ID."""
         fid1 = store.add_fact("Dedup test content", project="test-proj")
         fid2 = store.add_fact("Dedup test content", project="test-proj")
-        assert fid2 == fid1, "Same content within 60s should return existing ID"
+        assert fid2 == fid1, "Same content should return existing ID"
 
     def test_duplicate_count_incremented_on_dedup(self, store):
-        """Dedup hit within 60s increments duplicate_count."""
+        """Dedup hit increments duplicate_count."""
         fid1 = store.add_fact("Dedup count test", project="proj-a")
         fid2 = store.add_fact("Dedup count test", project="proj-a")
         assert fid2 == fid1
@@ -45,7 +45,7 @@ class TestContentHashDedup:
         )
 
     def test_duplicate_count_multiple_hits(self, store):
-        """Multiple dedup hits within 60s accumulate duplicate_count."""
+        """Multiple dedup hits accumulate duplicate_count."""
         fid1 = store.add_fact("Multiple dedup test", project="proj-b")
         fid_ref = fid1
         for _ in range(3):
@@ -116,35 +116,34 @@ class TestContentHashDedup:
         )
 
 
-class TestDedupTimeWindow:
-    """60s rolling window behavior."""
+class TestDedupLifetime:
+    """Lifetime dedup behavior — no time window."""
 
-    def test_within_window_dedup_increments_count(self, store):
-        """Same content+project within 60s: dedup, increments duplicate_count."""
-        fid1 = store.add_fact("Time window specific", project="tw-proj")
-        fid2 = store.add_fact("Time window specific", project="tw-proj")
+    def test_dedup_increments_count(self, store):
+        """Same content+project: dedup, increments duplicate_count."""
+        fid1 = store.add_fact("Lifetime dedup test", project="lt-proj")
+        fid2 = store.add_fact("Lifetime dedup test", project="lt-proj")
         assert fid2 == fid1
         fact = store.get_fact(fid1)
         assert fact["duplicate_count"] >= 1
 
-    def test_outside_window_does_not_increment(self, store):
-        """Same content+project outside 60s: duplicate_count NOT incremented."""
-        fid1 = store.add_fact("Outside window test", project="ow-proj")
+    def test_old_content_still_deduped(self, store):
+        """Same content+project, even if created long ago: dedup still works."""
+        fid1 = store.add_fact("Old content dedup", project="old-proj")
 
-        # Push the fact back by 120 seconds (outside the 60s window)
+        # Push the fact back by 120 seconds
         store._conn.execute(
             "UPDATE facts SET created_at = datetime('now', '-120 seconds') WHERE fact_id = ?",
             (fid1,),
         )
         store._conn.commit()
 
-        # Second add — content_hash dedup misses (outside window)
-        # UNIQUE(content) still returns same ID, but duplicate_count stays 0
-        fid2 = store.add_fact("Outside window test", project="ow-proj")
+        # Second add — content_hash dedup hits regardless of age
+        fid2 = store.add_fact("Old content dedup", project="old-proj")
         assert fid2 == fid1
         fact = store.get_fact(fid1)
-        assert fact["duplicate_count"] == 0, (
-            f"Expected duplicate_count=0 (outside window), "
+        assert fact["duplicate_count"] >= 1, (
+            f"Expected duplicate_count >= 1 (lifetime dedup), "
             f"got {fact['duplicate_count']}"
         )
 

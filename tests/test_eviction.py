@@ -138,13 +138,14 @@ class TestEvictStale:
 
     def test_returns_count(self, store):
         """evict_stale returns the number of evicted facts."""
-        for i in range(3):
-            fid = store.add_fact(f"Stale fact {i}", trust_score=0.05)
-            store._conn.execute(
-                "UPDATE facts SET last_retrieved_at = datetime('now', '-60 days') WHERE fact_id = ?",  # noqa: E501
-                (fid,),
-            )
-        store._conn.commit()
+        with store._lock:
+            for i in range(3):
+                fid = store.add_fact(f"Stale fact {i}", trust_score=0.05)
+                store._conn.execute(
+                    "UPDATE facts SET last_retrieved_at = datetime('now', '-60 days') WHERE fact_id = ?",  # noqa: E501
+                    (fid,),
+                )
+            store._conn.commit()
         count = store.evict_stale(min_trust=0.1, max_days=30)
         assert count == 3
 

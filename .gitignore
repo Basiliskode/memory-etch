@@ -42,6 +42,8 @@ scripts/test_adapter_flow.py
 
 # Benchmark outputs
 outputs/
+benchmark_*.json
+heavy_benchmark_results.json
 
 # SDD artifacts
 .sdd/
