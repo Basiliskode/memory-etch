@@ -102,14 +102,17 @@ class TestTimeline:
 
     def _seed_facts(self, store, count=5):
         ids = []
-        for i in range(count):
-            fid = store.add_fact(f"Fact number {i}", tags=f"seq:{i}",
-                                 session_id="test-session")
-            store._conn.execute(
-                "UPDATE facts SET created_at = datetime('now', ? || ' minutes') WHERE fact_id = ?",
-                (f"-{count - i}", fid)
-            )
-            ids.append(fid)
+        with store._lock:
+            for i in range(count):
+                fid = store.add_fact(f"Fact number {i}", tags=f"seq:{i}",
+                                     session_id="test-session")
+                store._conn.execute(
+                    "UPDATE facts SET created_at = datetime('now', ? || ' minutes') WHERE fact_id = ?",
+                    (f"-{count - i}", fid)
+                )
+                ids.append(fid)
+            # Close the implicit transaction left by the last UPDATE
+            store._conn.commit()
         return ids
 
     def test_timeline_returns_before_and_after(self, store):

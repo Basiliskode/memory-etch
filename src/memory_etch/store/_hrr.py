@@ -53,21 +53,26 @@ def _flush_pending_hrr_batch(store) -> None:
 
     try:
         dim = _get_effective_hrr_dim(store)
-        for fact_id, content in batch:
-            vec = hrr.encode_text(content, dim)
-            blob = hrr.phases_to_bytes(vec)
-            with store._lock:
+        encoded = [
+            (fact_id, hrr.phases_to_bytes(hrr.encode_text(content, dim)))
+            for fact_id, content in batch
+        ]
+        with store._lock:
+            for fact_id, blob in encoded:
                 store._conn.execute(
                     "UPDATE facts SET hrr_vector = ? WHERE fact_id = ?",
                     (blob, fact_id),
                 )
                 _invalidate_hrr_cache(store, fact_id)
-        with store._lock:
             store._conn.commit()
     except Exception:
         logger.exception("HRR flush failed")
         # Re-queue on failure
         with store._lock:
+            try:
+                store._conn.rollback()
+            except Exception:
+                logger.exception("HRR rollback failed")
             store._pending_hrr.extend(batch)
 
 

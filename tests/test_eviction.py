@@ -77,12 +77,14 @@ class TestEvictStale:
     def test_evicts_low_trust_old_fact(self, store):
         """Fact with trust < 0.1 and last_retrieved > 30 days ago is evicted."""
         fid = store.add_fact("Stale low-trust fact", trust_score=0.05)
-        # Manually set last_retrieved_at to far past
-        store._conn.execute(
-            "UPDATE facts SET last_retrieved_at = datetime('now', '-45 days') WHERE fact_id = ?",
-            (fid,),
-        )
-        store._conn.commit()
+        # Manually set last_retrieved_at to far past (hold lock to serialize
+        # with the background HRR flush thread on the same connection).
+        with store._lock:
+            store._conn.execute(
+                "UPDATE facts SET last_retrieved_at = datetime('now', '-45 days') WHERE fact_id = ?",
+                (fid,),
+            )
+            store._conn.commit()
         count = store.evict_stale(min_trust=0.1, max_days=30)
         assert count >= 1
         # Fact is now soft-deleted
@@ -92,11 +94,12 @@ class TestEvictStale:
     def test_keeps_high_trust_old_fact(self, store):
         """Fact with trust >= min_trust is NOT evicted."""
         fid = store.add_fact("High trust old fact", trust_score=0.5)
-        store._conn.execute(
-            "UPDATE facts SET last_retrieved_at = datetime('now', '-45 days') WHERE fact_id = ?",
-            (fid,),
-        )
-        store._conn.commit()
+        with store._lock:
+            store._conn.execute(
+                "UPDATE facts SET last_retrieved_at = datetime('now', '-45 days') WHERE fact_id = ?",
+                (fid,),
+            )
+            store._conn.commit()
         count = store.evict_stale(min_trust=0.1, max_days=30)
         assert count == 0
         fact = store.get_fact(fid)
@@ -105,23 +108,26 @@ class TestEvictStale:
     def test_keeps_low_trust_recently_retrieved(self, store):
         """Fact with low trust but recent retrieval is NOT evicted."""
         fid = store.add_fact("Recently retrieved low-trust", trust_score=0.05)
-        store._conn.execute(
-            "UPDATE facts SET last_retrieved_at = datetime('now', '-2 days') WHERE fact_id = ?",
-            (fid,),
-        )
-        store._conn.commit()
+        with store._lock:
+            store._conn.execute(
+                "UPDATE facts SET last_retrieved_at = datetime('now', '-2 days') WHERE fact_id = ?",
+                (fid,),
+            )
+            store._conn.commit()
         count = store.evict_stale(min_trust=0.1, max_days=30)
         assert count == 0
 
     def test_handles_never_retrieved_facts(self, store):
         """Facts with last_retrieved_at IS NULL and created > 7d ago are evicted."""
         fid = store.add_fact("Never retrieved old fact", trust_score=0.05)
-        # Force created_at to old date
-        store._conn.execute(
-            "UPDATE facts SET created_at = datetime('now', '-14 days') WHERE fact_id = ?",
-            (fid,),
-        )
-        store._conn.commit()
+        # Force created_at to old date — hold lock to serialize with
+        # the background HRR flush thread on the same connection.
+        with store._lock:
+            store._conn.execute(
+                "UPDATE facts SET created_at = datetime('now', '-14 days') WHERE fact_id = ?",
+                (fid,),
+            )
+            store._conn.commit()
         count = store.evict_stale(min_trust=0.1, max_days=30)
         assert count >= 1
         fact = store.get_fact(fid)
