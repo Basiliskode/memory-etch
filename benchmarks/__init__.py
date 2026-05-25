@@ -1,1 +1,1 @@
-"""External benchmark adapters for Memory Etch."""
+"""External benchmark adapters for memento."""

@@ -1,7 +1,7 @@
 """Tests for EtchRetriever hybrid search."""
 
 import pytest
-from memory_etch import EtchStore, EtchRetriever
+from memento import EtchStore, EtchRetriever
 
 
 @pytest.fixture

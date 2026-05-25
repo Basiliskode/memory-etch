@@ -8,7 +8,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_TOML = PROJECT_ROOT / "pyproject.toml"
-PY_TYPED = PROJECT_ROOT / "src" / "memory_etch" / "py.typed"
+PY_TYPED = PROJECT_ROOT / "src" / "memento" / "py.typed"
 PUBLISH_YML = PROJECT_ROOT / ".github" / "workflows" / "publish.yml"
 
 
@@ -17,7 +17,7 @@ PUBLISH_YML = PROJECT_ROOT / ".github" / "workflows" / "publish.yml"
 
 def test_version_string_present():
     """PKG: __version__ exists and is non-empty."""
-    from memory_etch import __version__
+    from memento import __version__
 
     assert isinstance(__version__, str)
     assert len(__version__) > 0
@@ -25,9 +25,9 @@ def test_version_string_present():
 
 def test_runtime_version_matches_package_metadata():
     """PKG: runtime __version__ mirrors installed package metadata."""
-    from memory_etch import __version__
+    from memento import __version__
 
-    assert __version__ == metadata("memory-etch")["Version"]
+    assert __version__ == metadata("memento")["Version"]
 
 
 def test_dev_extra_is_defined():
@@ -63,7 +63,7 @@ def test_etch_viewer_entry_point():
 
 def test_classifiers_include_stable():
     """PKG-2: Development Status :: 5 - Production/Stable classifier present."""
-    meta = metadata("memory-etch")
+    meta = metadata("memento")
     classifiers = meta.get_all("Classifier") or []
     assert any("Production/Stable" in c for c in classifiers), \
         "Expected Development Status :: 5 - Production/Stable (v1.0)"
@@ -71,7 +71,7 @@ def test_classifiers_include_stable():
 
 def test_license_mit():
     """PKG-2: License is MIT (PEP 639 expression, not classifier)."""
-    meta = metadata("memory-etch")
+    meta = metadata("memento")
     license_val = meta.get("License", "")
     assert license_val == "MIT" or "MIT" in str(meta), \
         "Expected license='MIT' in pyproject.toml (PEP 639)"
@@ -79,7 +79,7 @@ def test_license_mit():
 
 def test_classifiers_include_310_311_312():
     """PKG-2: Python 3.10, 3.11, 3.12 classifiers present."""
-    meta = metadata("memory-etch")
+    meta = metadata("memento")
     classifiers = meta.get_all("Classifier") or []
     for ver in ("3.10", "3.11", "3.12"):
         assert any(f"Python :: {ver}" in c for c in classifiers)
@@ -91,7 +91,7 @@ def test_classifiers_include_310_311_312():
 )
 def test_requires_python_reflects_constraint():
     """PKG-1: Requires-Python metadata entry matches constraint."""
-    meta = metadata("memory-etch")
+    meta = metadata("memento")
     rp = meta.get("Requires-Python", "")
     assert ">=" in rp
     assert "<" in rp or "<=" in rp
@@ -116,7 +116,7 @@ def test_py_typed_marker_is_file():
 @pytest.mark.skip(reason="Requires a fresh venv without extras; run manually")
 def test_base_install_no_extra_deps():
     """PKG-5: Base install does NOT make HRR or BGE-M3 mandatory."""
-    # Run in a fresh venv: pip install memory-etch && python -c "from memory_etch import EtchStore"
+    # Run in a fresh venv: pip install memento && python -c "from memento import EtchStore"
     # This test is a manual check and CI gate, not a runtime assert.
     pass
 
@@ -154,6 +154,6 @@ def test_publish_workflow_validates_distribution_before_publish():
 
 def test_etch_store_importable():
     """Package installs and EtchStore is importable (smoke)."""
-    from memory_etch import EtchStore
+    from memento import EtchStore
 
     assert EtchStore is not None

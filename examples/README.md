@@ -1,11 +1,11 @@
-# Memory Etch Examples
+# Memento Examples
 
-Example scripts demonstrating how to use Memory Etch in real-world scenarios.
+Example scripts demonstrating how to use Memento in real-world scenarios.
 
 ## Prerequisites
 
 - Python 3.10-3.12
-- `pip install memory-etch[hrr]` (adds numpy support for HRR vectors)
+- `pip install memento[hrr]` (adds numpy support for HRR vectors)
 
 ## Running Examples
 
@@ -33,7 +33,7 @@ behind after execution.
 
 ## Configuration
 
-Memory Etch is configured through Python dicts at provider creation:
+Memento is configured through Python dicts at provider creation:
 
 ```python
 provider = EtchMemoryProvider({
@@ -51,7 +51,7 @@ For production use with Hermes Agent, configure the provider in
 
 ```yaml
 memory:
-  provider: memory_etch
+  provider: memento
   config:
     db_path: "~/.hermes/memory.db"
     auto_extract_llm: true
@@ -59,5 +59,5 @@ memory:
 
 ## See Also
 
-- [Memory Etch README](https://github.com/Basiliskode/memory-etch)
+- [Memento README](https://github.com/Basiliskode/memento)
 - [Hermes Agent Documentation](https://github.com/Basiliskode/hermes-agent)

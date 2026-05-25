@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
-MCP_MODULE = "memory_etch.mcp.__main__"
+MCP_MODULE = "memento.mcp.__main__"
 
 
 @pytest.fixture
@@ -17,8 +17,8 @@ def server_params(tmp_path) -> StdioServerParameters:
     db_path = str(tmp_path / "test_etch.db")
     return StdioServerParameters(
         command=sys.executable,
-        args=["-m", "memory_etch.mcp"],
-        env={**os.environ, "MEMORY_ETCH_DB_PATH": db_path},
+        args=["-m", "memento.mcp"],
+        env={**os.environ, "MEMENTO_DB_PATH": db_path},
     )
 
 
@@ -27,8 +27,8 @@ def server_params_memory() -> StdioServerParameters:
     """Create StdioServerParameters using in-memory DB (for tests)."""
     return StdioServerParameters(
         command=sys.executable,
-        args=["-m", "memory_etch.mcp"],
-        env={**os.environ, "MEMORY_ETCH_DB_PATH": ":memory:"},
+        args=["-m", "memento.mcp"],
+        env={**os.environ, "MEMENTO_DB_PATH": ":memory:"},
     )
 
 
@@ -205,13 +205,13 @@ class TestMCPTools:
                 assert len(sim_data) >= 1
 
     @pytest.mark.asyncio
-    async def test_memory_etch_db_path_env_var(self, tmp_path):
-        """MEMORY_ETCH_DB_PATH env var controls the database path."""
+    async def test_memento_db_path_env_var(self, tmp_path):
+        """MEMENTO_DB_PATH env var controls the database path."""
         db_path = str(tmp_path / "custom_etch.db")
         params = StdioServerParameters(
             command=sys.executable,
-            args=["-m", "memory_etch.mcp"],
-            env={**os.environ, "MEMORY_ETCH_DB_PATH": db_path},
+            args=["-m", "memento.mcp"],
+            env={**os.environ, "MEMENTO_DB_PATH": db_path},
         )
         async with stdio_client(params) as (read, write):
             from mcp import ClientSession

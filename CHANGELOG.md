@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Community contribution docs, issue templates, PR template, and repository text normalization.
 
+### Changed
+
+- Renamed project from `memory-etch` to `memento` — package name, imports, config, env vars, and docs.
+
 ### Fixed
 
 - Aligned runtime package version, README snippets, MCP docs, extras docs, and release validation checks with the 1.1.0 package metadata.

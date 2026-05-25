@@ -1,4 +1,4 @@
-"""Backward-compatibility migration tests for the Memory Etch store.
+"""Backward-compatibility migration tests for the memento store.
 
 Ensures DBs created with older schemas still work with the current code.
 Tests the PRAGMA table_info guards that protect every query.
@@ -15,8 +15,8 @@ from pathlib import Path
 _sys_path = str(Path(__file__).resolve().parent.parent.parent / "plugins/memory/etch")
 if _sys_path not in sys.path:
     sys.path.insert(0, _sys_path)
-from memory_etch.store import EtchStore
-from memory_etch.retrieval import EtchRetriever
+from memento.store import EtchStore
+from memento.retrieval import EtchRetriever
 
 logger = logging.getLogger(__name__)
 

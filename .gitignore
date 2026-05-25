@@ -49,6 +49,7 @@ heavy_benchmark_results.json
 # SDD artifacts
 .sdd/
 openspec/
+.atl/
 
 # Engram local cache
 .engram/
@@ -61,4 +62,10 @@ uv.lock
 
 # Build artifacts
 /dist/
-memory_etch-*/
+memento-*/
+memory_etch-1.0.0/
+
+# Test DB artifacts
+memory_etch_test*.db
+memory_etch_test*.db-shm
+memory_etch_test*.db-wal

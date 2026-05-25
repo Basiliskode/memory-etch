@@ -1,4 +1,4 @@
-"""LOCOMO benchmark adapter for Memory Etch."""
+"""LOCOMO benchmark adapter for memento."""
 
 from .loader import LocomoQA, LocomoSample, LocomoTurn, load_locomo
 

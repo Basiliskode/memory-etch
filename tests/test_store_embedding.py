@@ -17,8 +17,8 @@ class TestStoreWithFastembed:
 
     def test_add_fact_stores_embedding_blob(self):
         """add_fact with FastembedProvider stores non-NULL embedding BLOB."""
-        from memory_etch import EtchStore
-        from memory_etch.embedding.fastembed_provider import FastembedProvider
+        from memento import EtchStore
+        from memento.embedding.fastembed_provider import FastembedProvider
 
         provider = FastembedProvider()
         try:
@@ -47,8 +47,8 @@ class TestStoreWithFastembed:
 
     def test_add_fact_embedding_kwarg_skips_provider(self):
         """Pre-supplied embedding kwarg is stored without provider computation."""
-        from memory_etch import EtchStore
-        from memory_etch.embedding.fastembed_provider import FastembedProvider
+        from memento import EtchStore
+        from memento.embedding.fastembed_provider import FastembedProvider
 
         provider = FastembedProvider()
         try:
@@ -69,8 +69,8 @@ class TestStoreWithFastembed:
 
     def test_search_returns_semantic_results(self):
         """search() with FastembedProvider returns RRF-fused semantic results."""
-        from memory_etch import EtchStore
-        from memory_etch.embedding.fastembed_provider import FastembedProvider
+        from memento import EtchStore
+        from memento.embedding.fastembed_provider import FastembedProvider
 
         provider = FastembedProvider()
         try:
@@ -96,8 +96,8 @@ class TestStoreWithFastembed:
 
     def test_search_with_noop_provider_fallback(self):
         """search() with NoopProvider returns only FTS5 results (no score key)."""
-        from memory_etch import EtchStore
-        from memory_etch.embedding import NoopProvider
+        from memento import EtchStore
+        from memento.embedding import NoopProvider
 
         provider = NoopProvider()
         store = EtchStore(":memory:", auto_migrate=True, embedding_provider=provider)
@@ -116,7 +116,7 @@ class TestStoreEmbeddingEdgeCases:
 
     def test_search_with_no_embeddings_returns_fts(self):
         """search() with NoopProvider and no embeddings returns FTS5 results."""
-        from memory_etch import EtchStore
+        from memento import EtchStore
 
         store = EtchStore(":memory:", auto_migrate=True)
         try:
@@ -129,7 +129,7 @@ class TestStoreEmbeddingEdgeCases:
 
     def test_search_by_embedding_empty_when_no_embeddings(self):
         """_search_by_embedding returns [] when no embeddings exist."""
-        from memory_etch import EtchStore
+        from memento import EtchStore
 
         store = EtchStore(":memory:", auto_migrate=True)
         try:

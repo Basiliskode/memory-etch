@@ -1,4 +1,4 @@
-"""Tests for memory_etch.plugins.bge_m3 — BGE-M3 embedding plugin.
+"""Tests for memento.plugins.bge_m3 — BGE-M3 embedding plugin.
 
 Unit tests verify lazy import and encoding contract without model download.
 Integration tests verify end-to-end wiring with EtchRetriever, and skip
@@ -35,8 +35,8 @@ class TestBgeM3LazyImport:
         if _HAS_FASTEMBED:
             pytest.skip("fastembed is installed — this test requires it to be absent")
         with pytest.raises(ImportError) as excinfo:
-            from memory_etch.plugins import bge_m3  # noqa: F401, F811
-        assert "pip install memory-etch[bge-m3]" in str(excinfo.value)
+            from memento.plugins import bge_m3  # noqa: F401, F811
+        assert "pip install memento[bge-m3]" in str(excinfo.value)
 
 
 @pytest.mark.skipif(not _HAS_FASTEMBED, reason="fastembed not installed — skipping BGE-M3 encoding tests")
@@ -45,14 +45,14 @@ class TestBgeM3Contract:
 
     def test_dimension_property(self):
         """BgeM3Plugin.dimension is 1024."""
-        from memory_etch.plugins.bge_m3 import BgeM3Plugin
+        from memento.plugins.bge_m3 import BgeM3Plugin
 
         plugin = BgeM3Plugin()
         assert plugin.dimension == 1024
 
     def test_encode_returns_1024_dim(self):
         """encode() returns a 1024-element vector."""
-        from memory_etch.plugins.bge_m3 import BgeM3Plugin
+        from memento.plugins.bge_m3 import BgeM3Plugin
 
         plugin = BgeM3Plugin()
         vec = plugin.encode("Hello world")
@@ -62,14 +62,14 @@ class TestBgeM3Contract:
 
     def test_import_does_not_download(self):
         """Module import alone does NOT trigger model download."""
-        from memory_etch.plugins.bge_m3 import BgeM3Plugin
+        from memento.plugins.bge_m3 import BgeM3Plugin
 
         p = BgeM3Plugin()
         assert p._model is None  # model not loaded yet
 
     def test_similar_texts_close_in_vector_space(self):
         """Similar texts produce similar vectors (cosine > 0.5)."""
-        from memory_etch.plugins.bge_m3 import BgeM3Plugin
+        from memento.plugins.bge_m3 import BgeM3Plugin
 
         plugin = BgeM3Plugin()
         v1 = plugin.encode("Python programming language")
@@ -82,7 +82,7 @@ class TestBgeM3Contract:
 
     def test_different_texts_distant_in_vector_space(self):
         """Unrelated texts have lower cosine than similar texts."""
-        from memory_etch.plugins.bge_m3 import BgeM3Plugin
+        from memento.plugins.bge_m3 import BgeM3Plugin
 
         plugin = BgeM3Plugin()
         v1 = plugin.encode("Python programming language")
@@ -105,9 +105,9 @@ class TestBgeM3Integration:
 
     def test_retriever_wired_with_bge_m3(self):
         """EtchRetriever with compute_embedding returns vector-ranked results."""
-        from memory_etch.store import EtchStore
-        from memory_etch.retrieval import EtchRetriever
-        from memory_etch.plugins.bge_m3 import BgeM3Plugin
+        from memento.store import EtchStore
+        from memento.retrieval import EtchRetriever
+        from memento.plugins.bge_m3 import BgeM3Plugin
 
         plugin = BgeM3Plugin()
         with tempfile.TemporaryDirectory() as tmp:
@@ -131,8 +131,8 @@ class TestBgeM3Integration:
 
     def test_retriever_fallback_without_embedder(self):
         """Without compute_embedding, search falls back to FTS5."""
-        from memory_etch.store import EtchStore
-        from memory_etch.retrieval import EtchRetriever
+        from memento.store import EtchStore
+        from memento.retrieval import EtchRetriever
 
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "test.db"

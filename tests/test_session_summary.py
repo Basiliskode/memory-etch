@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from memory_etch.store import EtchStore
+from memento.store import EtchStore
 
 
 @pytest.fixture

@@ -1,16 +1,16 @@
 # Embedding Vector Search (Optional)
 
-Memory Etch supports **optional embedding vector search** using
+Memento supports **optional embedding vector search** using
 [fastembed](https://github.com/qdrant/fastembed) or an Ollama embedding server.
 
 This feature is **purely optional** and is never a core dependency.
-Without it, Memory Etch works exactly as before — FTS5-first, with optional HRR
+Without it, Memento works exactly as before — FTS5-first, with optional HRR
 and Jaccard re-ranking when the `hrr` extra is installed.
 
 ## Installation
 
 ```bash
-pip install "memory-etch[embeddings]"
+pip install "memento[embeddings]"
 ```
 
 This installs `fastembed>=0.5.0` and `httpx>=0.27`. `fastembed` pulls ONNX Runtime
@@ -25,8 +25,8 @@ downloaded lazily on first use.
 ### 1. Basic provider usage
 
 ```python
-from memory_etch import EtchStore
-from memory_etch.embedding import FastembedProvider, OllamaProvider
+from memento import EtchStore
+from memento.embedding import FastembedProvider, OllamaProvider
 
 store = EtchStore("memory.db", embedding_provider=FastembedProvider())
 
@@ -44,8 +44,8 @@ results are fused via RRF (Reciprocal Rank Fusion) between the FTS5 and
 vector streams.
 
 ```python
-from memory_etch import EtchStore, EtchRetriever
-from memory_etch.plugins.bge_m3 import BgeM3Plugin
+from memento import EtchStore, EtchRetriever
+from memento.plugins.bge_m3 import BgeM3Plugin
 
 store = EtchStore("memory.db")
 plugin = BgeM3Plugin()
@@ -85,7 +85,7 @@ If you already have facts in your database, run the backfill script to
 compute and store their embeddings:
 
 ```bash
-pip install memory-etch[bge-m3]
+pip install memento[bge-m3]
 python scripts/backfill_embeddings.py path/to/memory.db --batch 32
 ```
 

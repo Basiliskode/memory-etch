@@ -66,7 +66,7 @@ def test_ci_workflow_runs_pytest_with_coverage_threshold():
     content = CI_WORKFLOW.read_text(encoding="utf-8")
 
     assert "python -m pytest tests/" in content
-    assert "--cov=memory_etch" in content
+    assert "--cov=memento" in content
     assert "--cov-fail-under=80" in content
 
 
@@ -90,7 +90,7 @@ def test_coveragerc_sets_source_and_omits_non_core_paths():
         "*/tests/*",
         "*/plugins/*",
         "*/translator_deprecated/*",
-        "src/memory_etch/benchmark/*",
+        "src/memento/benchmark/*",
     ):
         assert omitted in content
 

@@ -1,4 +1,4 @@
-"""AMB adapter for memory-etch — SQLite FTS5 + HRR persistent memory.
+"""AMB adapter for memento — SQLite FTS5 + HRR persistent memory.
 
 Drop this file into the AMB source tree and register it:
 
@@ -12,11 +12,11 @@ Then add to ``<amb-repo>/src/memory_bench/memory/__init__.py``:
 Run:
 
     uv sync  # or: pip install -e .
-    uv run amb run --dataset personamem --split 32k --memory etch --query-limit 20
+    uv run amb run --dataset personamem --split 32k --memento --query-limit 20
 
-Requires the ``memory-etch`` package:
-    pip install memory-etch
-    # or for development: pip install -e /path/to/memory-etch
+Requires the ``memento`` package:
+    pip install memento
+    # or for development: pip install -e /path/to/memento
 """
 
 import logging
@@ -93,7 +93,7 @@ def _extract_keywords(query: str) -> list[str]:
 
 
 class EtchMemoryProvider(MemoryProvider):
-    """memory-etch: local SQLite FTS5 + HRR persistent memory.
+    """memento: local SQLite FTS5 + HRR persistent memory.
 
     Features:
     - FTS5 full-text search (no external dependencies)
@@ -108,7 +108,7 @@ class EtchMemoryProvider(MemoryProvider):
 
     name = "etch"
     description = (
-        "memory-etch: SQLite FTS5 + HRR persistent memory. "
+        "memento: SQLite FTS5 + HRR persistent memory. "
         "FTS5 keyword search with HRR semantic similarity. "
         "Trust scoring, retrieval feedback, topic upsert."
     )
@@ -134,7 +134,7 @@ class EtchMemoryProvider(MemoryProvider):
         Creates the database file and runs schema migrations.
         When ``reset=True``, an existing database is removed first.
         """
-        from memory_etch import EtchStore
+        from memento import EtchStore
 
         self._db_path = Path(store_dir) / "etch_memory.db"
         if reset and self._db_path.exists():
@@ -161,7 +161,7 @@ class EtchMemoryProvider(MemoryProvider):
         """Ingest documents as facts.
 
         Each document is stored as a fact. The ``user_id`` field maps
-        to memory-etch's ``project`` namespace for per-user isolation.
+        to memento's ``project`` namespace for per-user isolation.
         Duplicate content is silently deduplicated (``INSERT OR IGNORE``).
         """
         if self._store is None:
@@ -201,7 +201,7 @@ class EtchMemoryProvider(MemoryProvider):
         if self._store is None:
             raise RuntimeError("Provider not prepared — call prepare() first")
 
-        from memory_etch import EtchRetriever
+        from memento import EtchRetriever
 
         retriever = EtchRetriever(self._store)
 
@@ -262,12 +262,12 @@ class EtchHybridMemoryProvider(EtchMemoryProvider):
     recall.
 
     Requires ``fastembed``:
-        pip install memory-etch[embeddings]
+        pip install memento[embeddings]
     """
 
     name = "etch-hybrid"
     description = (
-        "memory-etch with multi-strategy FTS5/HRR + BGE-small embeddings "
+        "memento with multi-strategy FTS5/HRR + BGE-small embeddings "
         "fused via RRF for maximum recall."
     )
 
@@ -279,7 +279,7 @@ class EtchHybridMemoryProvider(EtchMemoryProvider):
     ) -> None:
         if _HAS_FASTEMBED:
             try:
-                from memory_etch.embedding.fastembed_provider import FastembedProvider
+                from memento.embedding.fastembed_provider import FastembedProvider
                 self._embedder = FastembedProvider()
             except Exception as exc:
                 logger.warning("fastembed init failed: %s — falling back to FTS5+HRR", exc)
@@ -287,7 +287,7 @@ class EtchHybridMemoryProvider(EtchMemoryProvider):
         else:
             self._embedder = None
 
-        from memory_etch import EtchStore
+        from memento import EtchStore
 
         self._db_path = Path(store_dir) / "etch_memory.db"
         if reset and self._db_path.exists():
@@ -308,7 +308,7 @@ class EtchHybridMemoryProvider(EtchMemoryProvider):
         if self._store is None:
             raise RuntimeError("Provider not prepared — call prepare() first")
 
-        from memory_etch import EtchRetriever
+        from memento import EtchRetriever
 
         def _search_retriever(q: str) -> list[Document]:
             retriever = EtchRetriever(self._store)
@@ -363,7 +363,7 @@ class EtchHybridMemoryProvider(EtchMemoryProvider):
 # ---------------------------------------------------------------------------
 
 try:
-    from memory_etch.embedding.fastembed_provider import FastembedProvider as _FastembedProvider
+    from memento.embedding.fastembed_provider import FastembedProvider as _FastembedProvider
 
     _HAS_FASTEMBED = True
 except ImportError:
@@ -371,16 +371,16 @@ except ImportError:
 
 
 class EtchEmbMemoryProvider(EtchMemoryProvider):
-    """memory-etch with BGE-small-en-v1.5 embeddings via fastembed.
+    """memento with BGE-small-en-v1.5 embeddings via fastembed.
 
     Falls back to FTS5 + HRR when the embedding model is unavailable.
     Requires ``fastembed``:
-        pip install memory-etch[embeddings]
+        pip install memento[embeddings]
     """
 
     name = "etch-emb"
     description = (
-        "memory-etch with BGE-small-en-v1.5 embeddings (fastembed). "
+        "memento with BGE-small-en-v1.5 embeddings (fastembed). "
         "FTS5 + HRR + embedding vector search fused via RRF."
     )
 
@@ -392,7 +392,7 @@ class EtchEmbMemoryProvider(EtchMemoryProvider):
     ) -> None:
         if _HAS_FASTEMBED:
             try:
-                from memory_etch.embedding.fastembed_provider import FastembedProvider
+                from memento.embedding.fastembed_provider import FastembedProvider
 
                 self._embedder = FastembedProvider()
             except Exception as exc:
@@ -402,7 +402,7 @@ class EtchEmbMemoryProvider(EtchMemoryProvider):
             self._embedder = None
 
         # Create store WITH embedding provider wired in
-        from memory_etch import EtchStore
+        from memento import EtchStore
 
         self._db_path = Path(store_dir) / "etch_memory.db"
         if reset and self._db_path.exists():

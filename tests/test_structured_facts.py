@@ -1,7 +1,7 @@
 """Tests for structured fact fields (what, why, where_text, learned)."""
 
 import pytest
-from memory_etch import EtchStore
+from memento import EtchStore
 
 
 @pytest.fixture

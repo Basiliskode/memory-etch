@@ -3,9 +3,9 @@ import sqlite3
 
 import pytest
 
-from memory_etch import hrr
-from memory_etch.etch import EtchMemoryProvider
-from memory_etch.store import EtchStore
+from memento import hrr
+from memento.etch import EtchMemoryProvider
+from memento.store import EtchStore
 
 
 def test_export_import_roundtrips_public_fact_fields(tmp_path):
@@ -144,8 +144,8 @@ def test_provider_default_db_path_is_explicit_safe(tmp_path, monkeypatch):
     try:
         provider.initialize("safe-default")
         assert provider._store is not None
-        assert provider._store._db_path == "memory_etch_safe-default.db"
-        assert (tmp_path / "memory_etch_safe-default.db").exists()
+        assert provider._store._db_path == "memento_safe-default.db"
+        assert (tmp_path / "memento_safe-default.db").exists()
     finally:
         provider.shutdown()
 

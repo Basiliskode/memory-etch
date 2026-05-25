@@ -17,7 +17,7 @@ def test_readme_exists():
 def test_readme_has_spanish_title():
     """README has Spanish title and tagline."""
     text = README.read_text(encoding="utf-8")
-    assert "# Memory Etch" in text, "Title missing"
+    assert "# memento" in text, "Title missing"
     assert "SQLite + FTS5 + HRR" in text, "Tech stack missing"
 
 
@@ -119,13 +119,13 @@ def test_readme_has_hive_memory_section():
 
 
 def test_help_etchstore_runs():
-    """`from memory_etch import EtchStore; help(EtchStore)` runs without error."""
+    """`from memento import EtchStore; help(EtchStore)` runs without error."""
     import importlib
     try:
-        mod = importlib.import_module("memory_etch")
+        mod = importlib.import_module("memento")
         store_cls = mod.EtchStore
         help_text = store_cls.__doc__
         assert help_text is not None, "EtchStore has no docstring"
         assert "SQLite" in help_text, "EtchStore docstring missing content"
     except ImportError as e:
-        pytest.skip(f"memory_etch not importable: {e}")
+        pytest.skip(f"memento not importable: {e}")

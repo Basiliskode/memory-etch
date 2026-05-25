@@ -1,10 +1,10 @@
-"""Shared test fixtures for Memory Etch."""
+"""Shared test fixtures for memento."""
 
 from unittest.mock import MagicMock, patch
 
 import pytest
-from memory_etch import EtchStore, EtchRetriever
-from memory_etch.etch import EtchMemoryProvider
+from memento import EtchStore, EtchRetriever
+from memento.etch import EtchMemoryProvider
 
 
 @pytest.fixture

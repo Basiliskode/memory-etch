@@ -6,9 +6,9 @@ from unittest.mock import patch
 
 import pytest
 
-from memory_etch.store import EtchStore
-from memory_etch.curator import EtchCurator, _DEFAULT_CONFIG
-from memory_etch.etch import EtchMemoryProvider
+from memento.store import EtchStore
+from memento.curator import EtchCurator, _DEFAULT_CONFIG
+from memento.etch import EtchMemoryProvider
 
 
 # ─────────────────────────────────────────────────────────────────────────────

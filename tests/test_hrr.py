@@ -2,7 +2,7 @@
 
 import math
 import pytest
-from memory_etch import hrr
+from memento import hrr
 
 
 class TestHRRCore:

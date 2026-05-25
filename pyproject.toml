@@ -3,7 +3,7 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "memory-etch"
+name = "memento"
 version = "1.1.0"
 description = "Memoria persistente local-first para agentes AI — SQLite + FTS5 + HRR + embeddings opcionales"
 readme = "README.md"
@@ -34,18 +34,18 @@ benchmark = ["google-genai>=2.4.0"]
 openai = ["openai>=1.0.0"]
 anthropic = ["anthropic>=0.30.0"]
 dev = ["build>=1.2.0", "pytest>=8.0.0", "pytest-cov>=5.0.0", "ruff>=0.8.0", "twine>=5.0.0"]
-all = ["memory-etch[hrr]", "memory-etch[embeddings]", "memory-etch[mcp]", "memory-etch[openai]", "memory-etch[anthropic]"]
+all = ["memento[hrr]", "memento[embeddings]", "memento[mcp]", "memento[openai]", "memento[anthropic]"]
 
 [project.scripts]
-etch-viewer = "memory_etch.viewer:main"
+etch-viewer = "memento.viewer:main"
 
 [project.urls]
-"Homepage" = "https://github.com/Basiliskode/memory-etch"
-"Source" = "https://github.com/Basiliskode/memory-etch"
+"Homepage" = "https://github.com/Basiliskode/memento"
+"Source" = "https://github.com/Basiliskode/memento"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["memory_etch*"]
+include = ["memento*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

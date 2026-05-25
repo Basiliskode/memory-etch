@@ -5,7 +5,7 @@ Strict TDD: tests written BEFORE implementation.
 
 import sqlite3
 import pytest
-from memory_etch import EtchStore
+from memento import EtchStore
 
 
 @pytest.fixture
@@ -530,7 +530,7 @@ class TestRetrieverScopeFilters:
 
     @pytest.fixture
     def retriever(self, store):
-        from memory_etch import EtchRetriever
+        from memento import EtchRetriever
         return EtchRetriever(store, hrr_dim=256)
 
     def test_default_search_excludes_non_canonical(self, retriever):
@@ -589,7 +589,7 @@ class TestHermesProviderMetadata:
 
     def test_hermes_add_fact_default_harness(self, store):
         """Hermes add action defaults source_harness='hermes' via tool dispatch."""
-        from memory_etch.etch import EtchMemoryProvider
+        from memento.etch import EtchMemoryProvider
         import json
 
         p = EtchMemoryProvider({"db_path": ":memory:"})
@@ -615,7 +615,7 @@ class TestHermesProviderMetadata:
 
     def test_hermes_add_fact_passthrough_source(self, store):
         """Hermes add action passes explicit provenance args to add_fact."""
-        from memory_etch.etch import EtchMemoryProvider
+        from memento.etch import EtchMemoryProvider
         import json
 
         p = EtchMemoryProvider({"db_path": ":memory:"})
@@ -643,7 +643,7 @@ class TestHermesProviderMetadata:
 
     def test_hermes_add_fact_with_scope(self, store):
         """Hermes add action passes scope when provided."""
-        from memory_etch.etch import EtchMemoryProvider
+        from memento.etch import EtchMemoryProvider
         import json
 
         p = EtchMemoryProvider({"db_path": ":memory:"})
@@ -671,11 +671,11 @@ class TestHermesProviderMetadata:
 # =========================================================================
 
 try:
-    from memory_etch.mcp.server import add_fact as mcp_add_fact
-    from memory_etch.mcp.server import search_facts as mcp_search_facts
-    from memory_etch.mcp.server import list_inbox as mcp_list_inbox
-    from memory_etch.mcp.server import promote_fact as mcp_promote_fact
-    from memory_etch.mcp.server import reject_fact as mcp_reject_fact
+    from memento.mcp.server import add_fact as mcp_add_fact
+    from memento.mcp.server import search_facts as mcp_search_facts
+    from memento.mcp.server import list_inbox as mcp_list_inbox
+    from memento.mcp.server import promote_fact as mcp_promote_fact
+    from memento.mcp.server import reject_fact as mcp_reject_fact
     HAS_MCP = True
 except (ImportError, ModuleNotFoundError):
     HAS_MCP = False
@@ -688,7 +688,7 @@ class TestMCPMetadataPassthrough:
     def test_mcp_add_accepts_provenance_args(self):
         """MCP add_fact tool accepts optional provenance args."""
         # Can only test signature/import; integration requires mcp runtime
-        from memory_etch.mcp.server import add_fact
+        from memento.mcp.server import add_fact
         import inspect
         sig = inspect.signature(add_fact)
         assert "source_harness" in sig.parameters
@@ -698,7 +698,7 @@ class TestMCPMetadataPassthrough:
 
     def test_mcp_search_accepts_filters(self):
         """MCP search_facts tool accepts optional filter args."""
-        from memory_etch.mcp.server import search_facts
+        from memento.mcp.server import search_facts
         import inspect
         sig = inspect.signature(search_facts)
         assert "scope" in sig.parameters
@@ -713,7 +713,7 @@ class TestMCPInboxTools:
 
     def test_mcp_list_inbox_exists(self):
         """MCP list_inbox tool is callable and returns JSON."""
-        from memory_etch.mcp.server import list_inbox
+        from memento.mcp.server import list_inbox
         import inspect
         sig = inspect.signature(list_inbox)
         assert "project" in sig.parameters
@@ -722,14 +722,14 @@ class TestMCPInboxTools:
 
     def test_mcp_promote_fact_exists(self):
         """MCP promote_fact tool accepts fact_id."""
-        from memory_etch.mcp.server import promote_fact
+        from memento.mcp.server import promote_fact
         import inspect
         sig = inspect.signature(promote_fact)
         assert "fact_id" in sig.parameters
 
     def test_mcp_reject_fact_exists(self):
         """MCP reject_fact tool accepts fact_id and reason."""
-        from memory_etch.mcp.server import reject_fact
+        from memento.mcp.server import reject_fact
         import inspect
         sig = inspect.signature(reject_fact)
         assert "fact_id" in sig.parameters

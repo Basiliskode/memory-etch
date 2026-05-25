@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Standalone AMB-style benchmark runner for memory-etch.
+Standalone AMB-style benchmark runner for memento.
 
 Generates synthetic data to test memory recall across personas, facts,
 events, and preferences. Self-contained — no external datasets needed.
@@ -8,7 +8,7 @@ events, and preferences. Self-contained — no external datasets needed.
 Usage:
     set GEMINI_API_KEY=AIzaSy...
     python scripts/run_amb_benchmark.py --query-limit 5
-    python scripts/run_amb_benchmark.py --query-limit 5 --memory etch-emb
+    python scripts/run_amb_benchmark.py --query-limit 5 --memento-emb
     python scripts/run_amb_benchmark.py --help
 """
 
@@ -21,7 +21,7 @@ import tempfile
 import random
 from pathlib import Path
 
-# Ensure we can import memory-etch
+# Ensure we can import memento
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 # Import etch adapter directly (avoids AMB __init__.py which imports ALL providers)
@@ -449,7 +449,7 @@ def run_benchmark(memory_name: str, query_limit: int = None,
 # ═══════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run memory-etch benchmark")
+    parser = argparse.ArgumentParser(description="Run memento benchmark")
     parser.add_argument("--memory", default="etch", choices=["etch", "etch-emb", "etch-hybrid"],
                         help="Memory provider variant")
     parser.add_argument("--query-limit", type=int, default=None,

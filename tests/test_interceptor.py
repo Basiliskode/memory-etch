@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from memory_etch import EtchStore
-from memory_etch.interceptor import InterceptorHandle, intercept, teardown_all
+from memento import EtchStore
+from memento.interceptor import InterceptorHandle, intercept, teardown_all
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +130,7 @@ class TestGenericInterceptorMetadata:
         def fake_llm(messages, **kwargs):
             return "Assistant response text"
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         interceptor = GenericInterceptor(store, fake_llm)
         wrapped = interceptor.wrap()
@@ -149,7 +149,7 @@ class TestGenericInterceptorMetadata:
         def fake_llm(messages, **kwargs):
             return "Response"
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         interceptor = GenericInterceptor(store, fake_llm)
         wrapped = interceptor.wrap()
@@ -177,7 +177,7 @@ class TestGenericInterceptorWrap:
         def fake_llm(messages, **kwargs):
             return "Assistant response text"
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         interceptor = GenericInterceptor(store, fake_llm)
         wrapped = interceptor.wrap()
@@ -196,7 +196,7 @@ class TestGenericInterceptorWrap:
         def fake_llm(messages, **kwargs):
             return "Response text"
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         interceptor = GenericInterceptor(store, fake_llm)
         wrapped = interceptor.wrap()
@@ -223,7 +223,7 @@ class TestGenericInterceptorWrap:
         def fake_llm(messages, **kwargs):
             return "Response"
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         interceptor = GenericInterceptor(store, fake_llm, conversation_id="my-test-id")
         wrapped = interceptor.wrap()
@@ -240,7 +240,7 @@ class TestGenericInterceptorWrap:
         def fake_llm(messages, **kwargs):
             return "Response"
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         interceptor = GenericInterceptor(store, fake_llm, conversation_id="conv-123")
         wrapped = interceptor.wrap()
@@ -259,7 +259,7 @@ class TestGenericInterceptorWrap:
         def fake_llm(messages, **kwargs):
             return "Response"
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         interceptor = GenericInterceptor(store, fake_llm)
         wrapped = interceptor.wrap()
@@ -280,7 +280,7 @@ class TestGenericInterceptorWrap:
         def fake_llm(messages, model="default", **kwargs):
             return f"Response from {model}"
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         interceptor = GenericInterceptor(store, fake_llm)
         wrapped = interceptor.wrap()
@@ -297,7 +297,7 @@ class TestGenericInterceptorWrap:
             assert kwargs.get("temperature") == 0.7
             return "ok"
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         interceptor = GenericInterceptor(store, fake_llm)
         wrapped = interceptor.wrap()
@@ -314,7 +314,7 @@ class TestGenericInterceptorContextManager:
         def fake_llm(messages, **kwargs):
             return "ok"
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         with GenericInterceptor(store, fake_llm) as wrapped:
             result = wrapped(messages=[{"role": "user", "content": "Test"}])
@@ -329,7 +329,7 @@ class TestGenericInterceptorContextManager:
         original_fn = lambda messages, **kwargs: "original"
         original_id = id(original_fn)
 
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
 
         interceptor = GenericInterceptor(store, original_fn)
         wrapped = interceptor.wrap()
@@ -368,7 +368,7 @@ class TestExtractConversation:
         def llm_extract_fn(text):
             return ["User likes Python", "User uses VS Code"]
 
-        from memory_etch.interceptor.extract import extract_conversation
+        from memento.interceptor.extract import extract_conversation
 
         count = extract_conversation(conversation, store, llm_extract_fn)
         assert count == 2
@@ -385,7 +385,7 @@ class TestExtractConversation:
         def llm_extract_fn(text):
             return ["User likes Python"]
 
-        from memory_etch.interceptor.extract import extract_conversation
+        from memento.interceptor.extract import extract_conversation
 
         extract_conversation(conversation, store, llm_extract_fn)
 
@@ -410,7 +410,7 @@ class TestExtractConversation:
             received_text = text
             return ["User likes Python"]
 
-        from memory_etch.interceptor.extract import extract_conversation
+        from memento.interceptor.extract import extract_conversation
 
         extract_conversation(conversation, store, llm_extract_fn)
         assert received_text is not None
@@ -429,7 +429,7 @@ class TestExtractConversation:
         def llm_extract_fn(text):
             return []
 
-        from memory_etch.interceptor.extract import extract_conversation
+        from memento.interceptor.extract import extract_conversation
 
         count = extract_conversation(conversation, store, llm_extract_fn)
         assert count == 0
@@ -443,7 +443,7 @@ class TestExtractConversation:
         def llm_extract_fn(text):
             return []
 
-        from memory_etch.interceptor.extract import extract_conversation
+        from memento.interceptor.extract import extract_conversation
 
         count = extract_conversation([], store, llm_extract_fn)
         assert count == 0
@@ -545,7 +545,7 @@ class TestOpenAIWrapper:
         mock_create.return_value = completion
 
         with patch.dict("sys.modules", {"openai": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(etch_store, targets=["openai"])
             try:
@@ -574,7 +574,7 @@ class TestOpenAIWrapper:
         mock_create.return_value = completion
 
         with patch.dict("sys.modules", {"openai": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(etch_store, targets=["openai"])
             try:
@@ -595,7 +595,7 @@ class TestOpenAIWrapper:
         fake_module = self._make_patched_openai()
 
         with patch.dict("sys.modules", {"openai": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(etch_store, targets=["openai"])
             try:
@@ -615,7 +615,7 @@ class TestOpenAIWrapper:
         original_id = id(original_create)
 
         with patch.dict("sys.modules", {"openai": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             store = MagicMock(spec=EtchStore)
             store.add_fact.return_value = 1
@@ -671,7 +671,7 @@ class TestAnthropicWrapper:
         mock_create.return_value = message
 
         with patch.dict("sys.modules", {"anthropic": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(etch_store, targets=["anthropic"])
             try:
@@ -700,7 +700,7 @@ class TestAnthropicWrapper:
         mock_create.return_value = message
 
         with patch.dict("sys.modules", {"anthropic": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(etch_store, targets=["anthropic"])
             try:
@@ -721,7 +721,7 @@ class TestAnthropicWrapper:
         fake_module = _make_fake_anthropic_module()[0]
 
         with patch.dict("sys.modules", {"anthropic": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(etch_store, targets=["anthropic"])
             try:
@@ -741,7 +741,7 @@ class TestAnthropicWrapper:
         original_id = id(original_create)
 
         with patch.dict("sys.modules", {"anthropic": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             store = MagicMock(spec=EtchStore)
             store.add_fact.return_value = 1
@@ -767,7 +767,7 @@ class TestOpenAIMetadata:
         mock_create.return_value = completion
 
         with patch.dict("sys.modules", {"openai": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(etch_store, targets=["openai"])
             try:
@@ -793,7 +793,7 @@ class TestOpenAIMetadata:
         mock_create.return_value = completion
 
         with patch.dict("sys.modules", {"openai": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(etch_store, targets=["openai"])
             try:
@@ -822,7 +822,7 @@ class TestAnthropicMetadata:
         mock_create.return_value = message
 
         with patch.dict("sys.modules", {"anthropic": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(etch_store, targets=["anthropic"])
             try:
@@ -848,7 +848,7 @@ class TestAnthropicMetadata:
         mock_create.return_value = message
 
         with patch.dict("sys.modules", {"anthropic": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(etch_store, targets=["anthropic"])
             try:
@@ -881,7 +881,7 @@ class TestExtractMetadata:
         def llm_extract_fn(text):
             return ["User likes Python"]
 
-        from memory_etch.interceptor.extract import extract_conversation
+        from memento.interceptor.extract import extract_conversation
 
         extract_conversation(conversation, store, llm_extract_fn)
 
@@ -901,7 +901,7 @@ class TestExtractMetadata:
         def llm_extract_fn(text):
             return ["New fact"]
 
-        from memory_etch.interceptor.extract import extract_conversation
+        from memento.interceptor.extract import extract_conversation
 
         extract_conversation(conversation, store, llm_extract_fn)
 
@@ -922,24 +922,24 @@ class TestLazyImport:
     """Importing interceptor subpackage does NOT require SDKs installed."""
 
     def test_import_interceptor_without_sdks(self):
-        """from memory_etch.interceptor import intercept succeeds w/o SDKs."""
-        from memory_etch.interceptor import intercept, teardown_all, InterceptorHandle
+        """from memento.interceptor import intercept succeeds w/o SDKs."""
+        from memento.interceptor import intercept, teardown_all, InterceptorHandle
         assert callable(intercept)
         assert callable(teardown_all)
 
     def test_import_generic_without_sdks(self):
         """GenericInterceptor is importable without SDKs."""
-        from memory_etch.interceptor.generic import GenericInterceptor
+        from memento.interceptor.generic import GenericInterceptor
         assert callable(GenericInterceptor)
 
     def test_import_extract_without_sdks(self):
         """extract_conversation is importable without SDKs."""
-        from memory_etch.interceptor.extract import extract_conversation
+        from memento.interceptor.extract import extract_conversation
         assert callable(extract_conversation)
 
     def test_import_top_level_includes_interceptor(self):
-        """from memory_etch import intercept works."""
-        from memory_etch import intercept, teardown_all, InterceptorHandle, GenericInterceptor
+        """from memento import intercept works."""
+        from memento import intercept, teardown_all, InterceptorHandle, GenericInterceptor
         assert callable(intercept)
         assert callable(GenericInterceptor)
 
@@ -952,7 +952,7 @@ class TestIntegrationOpenAI:
         import sqlite3
 
         db_path = tmp_path / "test_integration.db"
-        from memory_etch import EtchStore
+        from memento import EtchStore
 
         store = EtchStore(str(db_path), auto_migrate=True)
 
@@ -963,7 +963,7 @@ class TestIntegrationOpenAI:
         mock_create.return_value = completion
 
         with patch.dict("sys.modules", {"openai": fake_module}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             handles = intercept(store, targets=["openai"])
             try:
@@ -1002,7 +1002,7 @@ class TestTeardownWithRealHandles:
         fake_anthropic, anth_create = _make_fake_anthropic_module()
 
         with patch.dict("sys.modules", {"openai": fake_openai, "anthropic": fake_anthropic}):
-            from memory_etch.interceptor import intercept, teardown_all
+            from memento.interceptor import intercept, teardown_all
 
             store = MagicMock(spec=EtchStore)
             store.add_fact.return_value = 1

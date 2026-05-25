@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from memory_etch.store import EtchStore
+from memento.store import EtchStore
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ class TestSearchViaSearchExpanded:
     """search_expanded also includes summary."""
 
     def test_search_expanded_contains_summary(self, store):
-        from memory_etch.retrieval import EtchRetriever
+        from memento.retrieval import EtchRetriever
         retriever = EtchRetriever(store)
         results = retriever.search_expanded("Python")
         assert len(results) >= 1

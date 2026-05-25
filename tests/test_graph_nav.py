@@ -5,7 +5,7 @@ and get_graph_stats.
 """
 
 import pytest
-from memory_etch.store import EtchStore
+from memento.store import EtchStore
 
 
 # =========================================================================

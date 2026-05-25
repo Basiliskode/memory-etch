@@ -12,8 +12,8 @@ import logging
 
 import pytest
 
-from memory_etch import EtchMemoryProvider
-from memory_etch.viewer import ViewerHandler, main as viewer_main
+from memento import EtchMemoryProvider
+from memento.viewer import ViewerHandler, main as viewer_main
 
 
 class TestCallLlmExtract:
@@ -52,7 +52,7 @@ class TestViewerLogging:
         handler.setFormatter(logging.Formatter(
             "%(asctime)s [%(levelname)s] %(message)s"
         ))
-        viewer_logger = logging.getLogger("memory_etch.viewer")
+        viewer_logger = logging.getLogger("memento.viewer")
         viewer_logger.addHandler(handler)
         viewer_logger.setLevel(logging.INFO)
 
@@ -133,7 +133,7 @@ class TestStartupLog:
         """Constructing EtchMemoryProvider logs that _call_llm_extract is not configured."""
         log_capture = io.StringIO()
         handler = logging.StreamHandler(log_capture)
-        etch_logger = logging.getLogger("memory_etch.etch")
+        etch_logger = logging.getLogger("memento.etch")
         etch_logger.addHandler(handler)
         etch_logger.setLevel(logging.INFO)
 

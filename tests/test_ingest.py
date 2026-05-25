@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from memory_etch import EtchStore
-from memory_etch.ingest import (
+from memento import EtchStore
+from memento.ingest import (
     detect_format,
     parse_csv,
     parse_json,

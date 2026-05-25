@@ -1,4 +1,4 @@
-"""Tests for the Memory Etch viewer (P6)."""
+"""Tests for the memento viewer (P6)."""
 import json
 import threading
 import time
@@ -8,8 +8,8 @@ from http.server import HTTPServer
 
 import pytest
 
-from memory_etch.store import EtchStore
-from memory_etch.viewer import ThreadedHTTPServer, ViewerHandler
+from memento.store import EtchStore
+from memento.viewer import ThreadedHTTPServer, ViewerHandler
 
 
 @pytest.fixture(scope="module")

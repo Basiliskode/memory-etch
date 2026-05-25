@@ -22,4 +22,4 @@ The maintainer should enable GitHub private vulnerability reporting before the f
 
 ## Scope
 
-Memory Etch is local-first. Reports involving local file handling, SQLite storage, plugin/provider boundaries, and accidental secret exposure are in scope. SaaS, hosted auth, and multi-tenant issues are out of scope unless the repository adds those features later.
+Memento is local-first. Reports involving local file handling, SQLite storage, plugin/provider boundaries, and accidental secret exposure are in scope. SaaS, hosted auth, and multi-tenant issues are out of scope unless the repository adds those features later.

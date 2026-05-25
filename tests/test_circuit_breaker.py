@@ -2,7 +2,7 @@
 
 import time
 
-from memory_etch.circuit_breaker import LLMCircuitBreaker
+from memento.circuit_breaker import LLMCircuitBreaker
 
 
 class TestCircuitBreakerInitialState:

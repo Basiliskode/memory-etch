@@ -60,10 +60,10 @@ check_env() {
         echo -e "  ${CROSS} python3 not found"; exit 1
     fi
 
-    if python3 -c "import memory_etch" 2>/dev/null; then
-        echo -e "  ${TICK} memory-etch $(python3 -c "import memory_etch; print(memory_etch.__version__)")"
+    if python3 -c "import memento" 2>/dev/null; then
+        echo -e "  ${TICK} memento $(python3 -c "import memento; print(memento.__version__)")"
     else
-        echo -e "  ${CROSS} memory-etch not installed — run: pip install -e ."
+        echo -e "  ${CROSS} memento not installed — run: pip install -e ."
     fi
 
     if python3 -c "import numpy" 2>/dev/null; then
@@ -101,7 +101,7 @@ do_serve() {
         echo -e "  ${CROSS} DB not found at $DB_PATH"
         exit 1
     fi
-    python3 -m memory_etch.viewer --db "$DB_PATH"
+    python3 -m memento.viewer --db "$DB_PATH"
 }
 
 case "$MODE" in

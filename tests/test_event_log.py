@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from memory_etch import EtchStore
+from memento import EtchStore
 
 
 # ---------------------------------------------------------------------------

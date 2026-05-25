@@ -1,4 +1,4 @@
-# Memory Etch — Architecture
+# Memento — Architecture
 
 ## Core Components
 

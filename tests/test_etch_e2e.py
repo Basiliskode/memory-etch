@@ -1,4 +1,4 @@
-"""End-to-end integration tests for the Memory Etch system.
+"""End-to-end integration tests for the memento system.
 
 Tests the full pipeline: provider init → buffer turns → LLM extraction →
 dedup/reinforce → fact storage → retrieval — using mocked LLM calls
@@ -46,7 +46,7 @@ sys.modules["hermes_constants"].get_hermes_home = lambda: Path(tempfile.mkdtemp(
 sys.modules["hermes_constants"].display_hermes_home = lambda: str(Path(tempfile.mkdtemp()))
 sys.modules["hermes_state"].apply_wal_with_fallback = lambda conn, *a, **kw: conn.execute("PRAGMA journal_mode=WAL")
 
-from memory_etch.__init__ import EtchMemoryProvider, _extractor_get_provider_config
+from memento.__init__ import EtchMemoryProvider, _extractor_get_provider_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 <img width="1081" height="396.5" alt="ChatGPT Image 20 may 2026, 20_23_22" src="https://github.com/user-attachments/assets/744ad33f-b6b2-49ad-98ac-141f7cad38e4" />
 <p/>
     
-# Memory Etch
+# memento
 
 **Memoria persistente local-first para agentes AI.** SQLite + FTS5 + HRR vectors + embeddings opcionales.
 Sin servicios externos, sin GPU, sin API keys.
@@ -11,7 +11,7 @@ Sin servicios externos, sin GPU, sin API keys.
 
 ## Tabla de Contenidos
 
-- [¿Por qué Memory Etch?](#por-qué-memory-etch)
+- [¿Por qué memento?](#por-qué-memento)
 - [Instalación](#instalación)
 - [Primeros pasos](#primeros-pasos)
 - [Arquitectura](#arquitectura)
@@ -26,7 +26,7 @@ Sin servicios externos, sin GPU, sin API keys.
 
 ---
 
-## ¿Por qué Memory Etch?
+## ¿Por qué memento?
 
 Los agentes AI necesitan memoria persistente para ser útiles. Pero las opciones existentes implicaban elegir entre:
 
@@ -34,11 +34,11 @@ Los agentes AI necesitan memoria persistente para ser útiles. Pero las opciones
 - **Infraestructura pesada** (Chroma, Qdrant, AgentMemory con iii-engine) — 2GB+ de descarga, runtimes externos, config compleja.
 - **Archivos JSON artesanales** — crecen como plaga, sin búsqueda, sin estructura.
 
-Memory Etch es el punto medio: **SQLite embedded, sin servidores, sin dependencias obligatorias, sin llamadas externas.** Tu información nunca sale de tu máquina.
+memento es el punto medio: **SQLite embedded, sin servidores, sin dependencias obligatorias, sin llamadas externas.** Tu información nunca sale de tu máquina.
 
 ```
-pip install memory-etch
-python -c "from memory_etch import EtchStore; s = EtchStore('memory.db'); print('anda')"
+pip install memento
+python -c "from memento import EtchStore; s = EtchStore('memory.db'); print('anda')"
 ```
 
 Eso es todo lo que necesitás para arrancar.
@@ -49,19 +49,19 @@ Eso es todo lo que necesitás para arrancar.
 
 ```bash
 # Mínimo: FTS5 + Jaccard (solo stdlib de Python)
-pip install memory-etch
+pip install memento
 
 # Recomendado: FTS5 + HRR vectors (necesita numpy)
-pip install "memory-etch[hrr]"
+pip install "memento[hrr]"
 
 # Con embeddings semánticos locales (BGE-small via fastembed)
-pip install "memory-etch[embeddings]"
+pip install "memento[embeddings]"
 
 # Con MCP server (para integrar con agentes vía MCP)
-pip install "memory-etch[mcp]"
+pip install "memento[mcp]"
 
 # Todo junto
-pip install "memory-etch[all]"
+pip install "memento[all]"
 ```
 
 **Requisitos:** Python 3.10-3.12 | Sin GPU | Sin CUDA | Sin runtime externo.
@@ -71,7 +71,7 @@ pip install "memory-etch[all]"
 ## Primeros pasos
 
 ```python
-from memory_etch import EtchStore, EtchRetriever
+from memento import EtchStore, EtchRetriever
 
 # Crear o abrir la base de datos
 store = EtchStore("memory.db")
@@ -139,8 +139,8 @@ store = EtchStore("project.db", project="auto")
 | **Jaccard** | Re-ranking por n-gramas | incluido en HRR | numpy (opt-in) |
 | **Embeddings** | Búsqueda semántica densa | ~185ms | fastembed (opt-in) |
 
-Por defecto usa solo FTS5 + Jaccard. Con `pip install memory-etch[hrr]` ganás HRR.
-Con `pip install memory-etch[embeddings]` ganás embeddings densos.
+Por defecto usa solo FTS5 + Jaccard. Con `pip install memento[hrr]` ganás HRR.
+Con `pip install memento[embeddings]` ganás embeddings densos.
 Cada nivel es opcional, aditivo, y retrocompatible.
 
 ---
@@ -193,12 +193,12 @@ Tres modos de búsqueda semántica, plug and play:
 store = EtchStore("memory.db")  # NoopProvider por defecto
 
 # 2. Con fastembed (local, ONNX, sin API key)
-#    pip install memory-etch[embeddings]
-from memory_etch.embedding import FastembedProvider
+#    pip install memento[embeddings]
+from memento.embedding import FastembedProvider
 store = EtchStore("memory.db", embedding_provider=FastembedProvider())
 
 # 3. Con Ollama (si ya tenés Ollama corriendo)
-from memory_etch.embedding import OllamaProvider
+from memento.embedding import OllamaProvider
 store = EtchStore("memory.db", embedding_provider=OllamaProvider(
     base_url="http://localhost:11434",
     model="nomic-embed-text",
@@ -211,14 +211,14 @@ Cada provider se puede usar en cualquier combinación con el MCP server.
 
 ## MCP Server
 
-Para integrar memory-etch con cualquier agente que soporte MCP (Claude Code, Codex, Gemini CLI, etc.):
+Para integrar memento con cualquier agente que soporte MCP (Claude Code, Codex, Gemini CLI, etc.):
 
 ```bash
-pip install "memory-etch[mcp]"
+pip install "memento[mcp]"
 
 # Con variable de entorno
-set MEMORY_ETCH_DB_PATH=./memory.db
-python -m memory_etch.mcp
+set memento_DB_PATH=./memory.db
+python -m memento.mcp
 ```
 
 **Tools disponibles:**
@@ -235,7 +235,7 @@ python -m memory_etch.mcp
 | `promote_fact` | Promueve un hecho de `inbox` a `canonical` |
 | `reject_fact` | Rechaza un hecho de `inbox` con soft-delete |
 
-Configuración vía `MEMORY_ETCH_DB_PATH`. Si no está definida, el servidor usa `:memory:` como default; para uso persistente, seteá una ruta explícita como `./memory.db` o `~/.memory-etch/etch.db`.
+Configuración vía `memento_DB_PATH`. Si no está definida, el servidor usa `:memory:` como default; para uso persistente, seteá una ruta explícita como `./memory.db` o `~/.memento/etch.db`.
 
 ---
 
@@ -289,21 +289,21 @@ Benchmark integrado para medir recall@k con dataset sintético y juez Gemini:
 # Requiere GEMINI_API_KEY
 export GEMINI_API_KEY="..."
 
-# Benchmark memory-etch (FTS5 + HRR)
-python -m memory_etch.benchmark --verbose
+# Benchmark memento (FTS5 + HRR)
+python -m memento.benchmark --verbose
 
 # Benchmark contra baseline JSON (para comparar)
-python -m memory_etch.benchmark --provider json-baseline --verbose
+python -m memento.benchmark --provider json-baseline --verbose
 
 # Personalizar dataset
-python -m memory_etch.benchmark --n-docs 500 --seed 42 --output results.json
+python -m memento.benchmark --n-docs 500 --seed 42 --output results.json
 ```
 
 Para benchmarkear OTRO sistema de memoria contra el mismo benchmark,
 implementá ``MemoryProvider``:
 
 ```python
-from memory_etch.benchmark import MemoryProvider, BenchmarkRunner
+from memento.benchmark import MemoryProvider, BenchmarkRunner
 
 class MyMemory(MemoryProvider):
     name = "mi-sistema"
@@ -319,7 +319,7 @@ Resultado de referencia (100 docs, 18 queries):
 
 | Provider | Accuracy | Avg retrieve |
 |---|---|---|
-| memory-etch (FTS5 + HRR) | **94.4%** (17/18) | **5.2ms** |
+| memento (FTS5 + HRR) | **94.4%** (17/18) | **5.2ms** |
 | JSON baseline (word overlap) | ~40% | ~0.1ms |
 
 ---
@@ -331,7 +331,7 @@ Resultado de referencia (100 docs, 18 queries):
 Visualizá toda la memoria de tu agente en un SPA local, sin servidores, sin config.
 
 ```bash
-python -m memory_etch.viewer --db ./memory.db
+python -m memento.viewer --db ./memory.db
 # http://127.0.0.1:9120
 ```
 
@@ -355,7 +355,7 @@ git push
 
 # Otro dev hace pull y abre el viewer
 git pull
-python -m memory_etch.viewer --db memory.db
+python -m memento.viewer --db memory.db
 # → ve exactamente los mismos facts, relaciones, timeline
 ```
 
@@ -377,7 +377,7 @@ Benchmark reproducible:
 
 ```bash
 set GEMINI_API_KEY=...
-pip install "memory-etch[hrr]"
+pip install "memento[hrr]"
 python scripts/run_amb_benchmark.py --n-docs 100 --verbose
 ```
 
@@ -407,7 +407,7 @@ Documentación detallada en [`docs/api/`](docs/api/):
 
 | Proyecto | Diferenciador |
 |---|---|
-| **memory-etch** | Local-first, KISS, SQLite, sin runtime externo, HRR vectors |
+| **memento** | Local-first, KISS, SQLite, sin runtime externo, HRR vectors |
 | **CodeGraph** | Code intelligence (tree-sitter + grafo de símbolos), NO es memoria de agente |
 | **AgentMemory** | Memoria full-featured con iii-engine dedicado, más features, más complejidad |
 | **Engram** | Memoria para agentes Go/MCP, sin embeddings, curada por el agente |
@@ -417,8 +417,8 @@ Documentación detallada en [`docs/api/`](docs/api/):
 ## Contribuir
 
 ```bash
-git clone https://github.com/Basiliskode/memory-etch
-cd memory-etch
+git clone https://github.com/Basiliskode/memento
+cd memento
 pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
@@ -433,11 +433,11 @@ MIT. Construí algo útil.
 
 ---
 
-> Memory Etch nació dentro de un agente AI real que necesitaba acordarse de las cosas sin depender de servicios externos. Hoy corre en producción y está probado con miles de facts.
+> memento nació dentro de un agente AI real que necesitaba acordarse de las cosas sin depender de servicios externos. Hoy corre en producción y está probado con miles de facts.
 >
 > Si estás construyendo un agente que necesite memoria, probalo. Son 30 segundos.
 >
 > ```bash
-> pip install "memory-etch[hrr]"
-> python -c "from memory_etch import EtchStore; s = EtchStore('test.db'); print('anda')"
+> pip install "memento[hrr]"
+> python -c "from memento import EtchStore; s = EtchStore('test.db'); print('anda')"
 > ```

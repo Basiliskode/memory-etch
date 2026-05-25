@@ -15,8 +15,8 @@ from pathlib import Path
 _sys_path = str(Path(__file__).resolve().parent.parent.parent / "plugins/memory/etch")
 if _sys_path not in sys.path:
     sys.path.insert(0, _sys_path)
-from memory_etch.store import EtchStore
-from memory_etch.retrieval import EtchRetriever
+from memento.store import EtchStore
+from memento.retrieval import EtchRetriever
 
 
 # =========================================================================
@@ -289,7 +289,7 @@ class TestMultiProject:
         assert row["project"] == "proj-b"
 
     def test_retriever_search_with_project(self, store):
-        from memory_etch.retrieval import EtchRetriever
+        from memento.retrieval import EtchRetriever
         retriever = EtchRetriever(store=store)
 
         store.add_fact("Authentication is done with JWT tokens", project="hermes-agent")
@@ -301,7 +301,7 @@ class TestMultiProject:
         assert "JWT" in results[0]["content"]
 
     def test_retriever_probe_with_project(self, store):
-        from memory_etch.retrieval import EtchRetriever
+        from memento.retrieval import EtchRetriever
         retriever = EtchRetriever(store=store)
 
         store.add_fact("HermesAgent is the main framework", tags="hermes", project="project-a")

@@ -5,8 +5,8 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from memory_etch import EtchStore
-from memory_etch.project import detect_project
+from memento import EtchStore
+from memento.project import detect_project
 
 
 class TestDetectProject:

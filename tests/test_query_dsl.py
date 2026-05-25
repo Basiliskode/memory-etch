@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-from memory_etch import EtchStore
+from memento import EtchStore
 
 
 # =============================================================================

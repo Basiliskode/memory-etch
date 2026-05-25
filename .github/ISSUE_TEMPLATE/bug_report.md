@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Report a reproducible problem in Memory Etch
+about: Report a reproducible problem in Memento
 title: "bug: "
 labels: bug
 assignees: ""
@@ -24,7 +24,7 @@ What should have happened instead?
 
 - OS:
 - Python version:
-- Memory Etch version or commit:
+- Memento version or commit:
 - Installed extras, if any: `hrr`, `bge-m3`, `all`
 
 ## Logs or traceback

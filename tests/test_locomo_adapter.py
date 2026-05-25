@@ -2,7 +2,14 @@ import json
 from pathlib import Path
 
 from benchmarks.locomo.loader import load_locomo
-from benchmarks.locomo.runner import LocomoRunner
+from benchmarks.locomo.runner import (
+    GeminiAnswerer,
+    LocomoRunner,
+    build_answer_prompt,
+    build_gemini_payload,
+    evaluate_qa_diagnostics,
+    main,
+)
 
 
 def test_load_locomo_official_shape(tmp_path: Path):
@@ -140,6 +147,204 @@ def test_locomo_runner_isolates_conversations(tmp_path: Path):
         f"Conv_B leaked into retrieval: {retrieved_texts}"
     )
     assert "D1:1" in result["retrieved_ids"]
+
+
+def test_locomo_extractive_answerer_writes_prediction_and_metadata(tmp_path: Path):
+    data_path = tmp_path / "locomo10.json"
+    output_path = tmp_path / "results.json"
+    data_path.write_text(json.dumps([_sample()]), encoding="utf-8")
+
+    runner = LocomoRunner(
+        samples=load_locomo(data_path),
+        output_path=output_path,
+        top_k=2,
+        memory_variant="etch-noop",
+        answerer_provider="extractive",
+        local_eval=True,
+        seed=123,
+        dataset_path=str(data_path),
+    )
+    summary = runner.run()
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    result = payload["results"][0]
+    assert summary["dry_run"] is False
+    assert summary["prompt_version"] == "locomo-context-only-v1"
+    assert summary["qa_diagnostics"]["metric_set"] == "local_qa_diagnostics_v1"
+    assert result["prediction"] == "Alice painted a blue mug in pottery class."
+    assert result["prediction_meta"]["provider"] == "extractive"
+    assert result["prediction_meta"]["source_dia_id"] == "D1:2"
+
+
+def test_answer_prompt_requires_context_only_short_answer():
+    prompt = build_answer_prompt(
+        "What did Alice paint?",
+        [
+            {
+                "dia_id": "D1:2",
+                "session_id": "session_1",
+                "timestamp": "10:00 am",
+                "speaker": "Alice",
+                "text": "Alice painted a blue mug.",
+            }
+        ],
+    )
+
+    assert "Use only the retrieved context" in prompt
+    assert "Do not use outside knowledge or guess" in prompt
+    assert "No information available" in prompt
+    assert "Context ID: D1:2" in prompt
+    assert "Short answer:" in prompt
+
+
+def test_evaluate_qa_diagnostics_on_synthetic_outputs():
+    metrics = evaluate_qa_diagnostics(
+        [
+            {
+                "question_id": "q1",
+                "gold_answer": "a blue mug",
+                "prediction": "Alice painted a blue mug in pottery class.",
+            },
+            {
+                "question_id": "q2",
+                "gold_answer": "Dana",
+                "prediction": "No information available",
+            },
+        ]
+    )
+
+    assert metrics["metric_set"] == "local_qa_diagnostics_v1"
+    assert metrics["qa_with_gold"] == 2
+    assert metrics["contains_avg"] == 0.5
+    assert metrics["exact-ish_avg"] == 0.0
+    assert metrics["token_f1_avg"] == 0.2222
+
+
+def test_locomo_cli_local_eval_metadata(tmp_path: Path):
+    data_path = tmp_path / "locomo10.json"
+    output_path = tmp_path / "results.json"
+    data_path.write_text(json.dumps([_sample()]), encoding="utf-8")
+
+    exit_code = main(
+        [
+            "--input",
+            str(data_path),
+            "--output",
+            str(output_path),
+            "--answerer-provider",
+            "extractive",
+            "--local-eval",
+            "--qa-limit",
+            "1",
+        ]
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert payload["summary"]["answerer_provider"] == "extractive"
+    assert payload["summary"]["dataset_path"] == str(data_path)
+    assert payload["summary"]["qa_diagnostics"]["qa_with_gold"] == 1
+
+
+def test_locomo_cli_accepts_gemini_and_reports_missing_key(
+    tmp_path: Path, monkeypatch, capsys
+):
+    data_path = tmp_path / "locomo10.json"
+    output_path = tmp_path / "results.json"
+    data_path.write_text(json.dumps([_sample()]), encoding="utf-8")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+
+    exit_code = main(
+        [
+            "--input",
+            str(data_path),
+            "--output",
+            str(output_path),
+            "--answerer-provider",
+            "gemini",
+            "--qa-limit",
+            "1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "GEMINI_API_KEY is required" in captured.err
+    assert "invalid choice" not in captured.err
+    assert "fake-test-key" not in captured.err
+
+
+def test_gemini_payload_uses_context_only_prompt():
+    payload = build_gemini_payload(
+        "What did Alice paint?",
+        [
+            {
+                "dia_id": "D1:2",
+                "session_id": "session_1",
+                "timestamp": "10:00 am",
+                "speaker": "Alice",
+                "text": "Alice painted a blue mug.",
+            }
+        ],
+    )
+
+    prompt = payload["contents"][0]["parts"][0]["text"]
+    assert payload["systemInstruction"]["parts"][0]["text"] == (
+        "Answer LOCOMO questions using only the supplied context."
+    )
+    assert "Use only the retrieved context" in prompt
+    assert "Context ID: D1:2" in prompt
+    assert payload["generationConfig"]["maxOutputTokens"] == 256
+
+
+def test_gemini_answerer_posts_generate_content_request(monkeypatch):
+    requests = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "candidates": [
+                        {"content": {"parts": [{"text": "a blue mug"}]}}
+                    ]
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        requests.append((request, timeout))
+        return FakeResponse()
+
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-test-key")
+    monkeypatch.setattr("benchmarks.locomo.runner.urllib.request.urlopen", fake_urlopen)
+
+    answerer = GeminiAnswerer("gemini-test-model", timeout_seconds=12.5)
+    result = answerer.answer(
+        "What did Alice paint?",
+        [
+            {
+                "dia_id": "D1:2",
+                "session_id": "session_1",
+                "timestamp": "10:00 am",
+                "speaker": "Alice",
+                "text": "Alice painted a blue mug.",
+            }
+        ],
+    )
+
+    request, timeout = requests[0]
+    payload = json.loads(request.data.decode("utf-8"))
+    assert result["text"] == "a blue mug"
+    assert result["meta"]["provider"] == "gemini"
+    assert result["meta"]["model"] == "gemini-test-model"
+    assert timeout == 12.5
+    assert "gemini-test-model:generateContent" in request.full_url
+    assert payload["contents"][0]["parts"][0]["text"].endswith("Short answer:")
 
 
 def _sample():

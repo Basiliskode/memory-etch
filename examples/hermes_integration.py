@@ -1,7 +1,7 @@
 """
 Hermes Agent Memory Provider -- Quick Start.
 
-Requires: pip install memory-etch[hrr]
+Requires: pip install memento[hrr]
 
 This example demonstrates the full lifecycle:
   1. Initialize an EtchMemoryProvider with a temp database
@@ -17,12 +17,12 @@ import json
 import tempfile
 from pathlib import Path
 
-from memory_etch import EtchMemoryProvider
+from memento import EtchMemoryProvider
 
 
 def main():
     print("=" * 60)
-    print("Memory Etch - Hermes Integration Example")
+    print("memento - Hermes Integration Example")
     print("=" * 60)
 
     # Use a temporary database so cleanup is automatic
@@ -53,15 +53,15 @@ def main():
             "importance": "critical",
         },
         {
-            "content": "Memory Etch uses SQLite with FTS5 for full-text search",
+            "content": "memento uses SQLite with FTS5 for full-text search",
             "category": "tool",
-            "tags": "python,database,sqlite,memory-etch",
+            "tags": "python,database,sqlite,memento",
             "importance": "important",
         },
         {
             "content": "HRR vectors provide 256-dimensional similarity search without GPU",
             "category": "tool",
-            "tags": "python,vectors,hrr,memory-etch",
+            "tags": "python,vectors,hrr,memento",
             "importance": "important",
         },
     ]

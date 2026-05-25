@@ -17,7 +17,7 @@ def test_contributing_guides_setup_tests_linting_and_pr_flow():
     assert_has(
         "CONTRIBUTING.md",
         (
-            "# Contributing to Memory Etch",
+            "# Contributing to memento",
             "## Quick start",
             'pip install -e ".[dev]"',
             "python -m pytest tests/",

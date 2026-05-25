@@ -10,14 +10,14 @@ class TestEmbeddingProviderABC:
 
     def test_abc_cannot_be_instantiated_directly(self):
         """EmbeddingProvider ABC raises TypeError on direct instantiation."""
-        from memory_etch.embedding import EmbeddingProvider
+        from memento.embedding import EmbeddingProvider
 
         with pytest.raises(TypeError):
             EmbeddingProvider()  # type: ignore
 
     def test_noop_provider_raises_not_implemented(self):
         """NoopProvider.embed() raises NotImplementedError."""
-        from memory_etch.embedding import NoopProvider
+        from memento.embedding import NoopProvider
 
         provider = NoopProvider()
         with pytest.raises(NotImplementedError) as excinfo:
@@ -26,14 +26,14 @@ class TestEmbeddingProviderABC:
 
     def test_noop_provider_close_is_noop(self):
         """NoopProvider.close() does not raise."""
-        from memory_etch.embedding import NoopProvider
+        from memento.embedding import NoopProvider
 
         provider = NoopProvider()
         provider.close()  # must not raise
 
     def test_noop_provider_dimension_property(self):
         """NoopProvider dimension raises NotImplementedError."""
-        from memory_etch.embedding import NoopProvider
+        from memento.embedding import NoopProvider
 
         provider = NoopProvider()
         with pytest.raises(NotImplementedError):
@@ -43,19 +43,19 @@ class TestEmbeddingProviderABC:
         """EmbeddingProvider declares embed and dimension as abstract."""
         import abc
 
-        from memory_etch.embedding import EmbeddingProvider
+        from memento.embedding import EmbeddingProvider
 
         assert issubclass(EmbeddingProvider, abc.ABC)
         assert "embed" in EmbeddingProvider.__abstractmethods__
         assert "dimension" in EmbeddingProvider.__abstractmethods__
 
     def test_documented_provider_imports_are_exported_lazily(self):
-        """README snippets import concrete providers from memory_etch.embedding."""
+        """README snippets import concrete providers from memento.embedding."""
         import sys
 
         sys.modules.pop("fastembed", None)
 
-        from memory_etch.embedding import FastembedProvider, OllamaProvider
+        from memento.embedding import FastembedProvider, OllamaProvider
 
         assert FastembedProvider.__name__ == "FastembedProvider"
         assert OllamaProvider.__name__ == "OllamaProvider"
@@ -67,8 +67,8 @@ class TestNoopProviderDefault:
 
     def test_store_init_without_provider_uses_noop(self):
         """EtchStore without embedding_provider arg uses NoopProvider."""
-        from memory_etch import EtchStore
-        from memory_etch.embedding import NoopProvider
+        from memento import EtchStore
+        from memento.embedding import NoopProvider
 
         store = EtchStore(":memory:", auto_migrate=True)
         try:
@@ -78,8 +78,8 @@ class TestNoopProviderDefault:
 
     def test_store_init_with_none_uses_noop(self):
         """EtchStore(embedding_provider=None) uses NoopProvider."""
-        from memory_etch import EtchStore
-        from memory_etch.embedding import NoopProvider
+        from memento import EtchStore
+        from memento.embedding import NoopProvider
 
         store = EtchStore(":memory:", auto_migrate=True, embedding_provider=None)
         try:
@@ -101,7 +101,7 @@ class TestFastembedProvider:
 
     def test_fastembed_provider_instantiation(self):
         """FastembedProvider can be instantiated with lazy import."""
-        from memory_etch.embedding.fastembed_provider import FastembedProvider
+        from memento.embedding.fastembed_provider import FastembedProvider
 
         provider = FastembedProvider()
         try:
@@ -111,7 +111,7 @@ class TestFastembedProvider:
 
     def test_fastembed_embed_returns_list_of_lists(self):
         """FastembedProvider.embed() returns list[list[float]] with correct dim."""
-        from memory_etch.embedding.fastembed_provider import FastembedProvider
+        from memento.embedding.fastembed_provider import FastembedProvider
 
         provider = FastembedProvider()
         try:
@@ -130,7 +130,7 @@ class TestFastembedProvider:
         """FastembedProvider returns L2-normalized vectors (norm ≈ 1.0)."""
         import math
 
-        from memory_etch.embedding.fastembed_provider import FastembedProvider
+        from memento.embedding.fastembed_provider import FastembedProvider
 
         provider = FastembedProvider()
         try:
@@ -144,7 +144,7 @@ class TestFastembedProvider:
 
     def test_fastembed_multiple_texts(self):
         """FastembedProvider.embed() handles multiple texts."""
-        from memory_etch.embedding.fastembed_provider import FastembedProvider
+        from memento.embedding.fastembed_provider import FastembedProvider
 
         provider = FastembedProvider()
         try:
@@ -162,13 +162,13 @@ class TestFastembedProvider:
 
         # Clean up
         for mod in list(sys.modules.keys()):
-            if mod == "memory_etch.embedding.fastembed_provider":
+            if mod == "memento.embedding.fastembed_provider":
                 del sys.modules[mod]
             if mod == "fastembed":
                 del sys.modules[mod]
 
         # Import just the provider module — must not import fastembed
-        from memory_etch.embedding import fastembed_provider
+        from memento.embedding import fastembed_provider
 
         assert fastembed_provider is not None
         assert "fastembed" not in sys.modules, (
@@ -181,7 +181,7 @@ class TestOllamaProvider:
 
     def test_ollama_provider_instantiation(self):
         """OllamaProvider can be instantiated with default params."""
-        from memory_etch.embedding.ollama_provider import OllamaProvider
+        from memento.embedding.ollama_provider import OllamaProvider
 
         provider = OllamaProvider()
         try:
@@ -191,7 +191,7 @@ class TestOllamaProvider:
 
     def test_ollama_provider_custom_config(self):
         """OllamaProvider accepts custom base_url and model."""
-        from memory_etch.embedding.ollama_provider import OllamaProvider
+        from memento.embedding.ollama_provider import OllamaProvider
 
         provider = OllamaProvider(
             base_url="http://custom:11434",
@@ -207,7 +207,7 @@ class TestOllamaProvider:
 
     def test_ollama_embed_sends_correct_request(self):
         """OllamaProvider.embed() POSTs to /api/embeddings with correct body."""
-        from memory_etch.embedding.ollama_provider import OllamaProvider
+        from memento.embedding.ollama_provider import OllamaProvider
 
         provider = OllamaProvider(base_url="http://test:11434", model="test-model")
         try:
@@ -232,7 +232,7 @@ class TestOllamaProvider:
 
     def test_ollama_embed_connection_error(self):
         """OllamaProvider.embed() raises ConnectionError on connection failure."""
-        from memory_etch.embedding.ollama_provider import OllamaProvider
+        from memento.embedding.ollama_provider import OllamaProvider
 
         provider = OllamaProvider(base_url="http://nonexistent:11434")
         try:
@@ -247,7 +247,7 @@ class TestOllamaProvider:
 
     def test_ollama_bad_status_raises(self):
         """OllamaProvider.embed() raises RuntimeError on bad HTTP status."""
-        from memory_etch.embedding.ollama_provider import OllamaProvider
+        from memento.embedding.ollama_provider import OllamaProvider
 
         provider = OllamaProvider(base_url="http://test:11434")
         try:
@@ -266,23 +266,23 @@ class TestPackageExports:
     """Task 1.4, 1.5: Package exports."""
 
     def test_embedding_subpackage_importable(self):
-        """memory_etch.embedding subpackage is importable."""
-        from memory_etch import embedding
+        """memento.embedding subpackage is importable."""
+        from memento import embedding
         assert hasattr(embedding, "EmbeddingProvider")
         assert hasattr(embedding, "NoopProvider")
 
     def test_top_level_exports(self):
-        """EmbeddingProvider and NoopProvider exported from memory_etch top level."""
-        import memory_etch
-        assert hasattr(memory_etch, "EmbeddingProvider")
-        assert hasattr(memory_etch, "NoopProvider")
+        """EmbeddingProvider and NoopProvider exported from memento top level."""
+        import memento
+        assert hasattr(memento, "EmbeddingProvider")
+        assert hasattr(memento, "NoopProvider")
 
     def test_fastembed_provider_module_importable(self):
         """FastembedProvider module is importable."""
-        from memory_etch.embedding.fastembed_provider import FastembedProvider
+        from memento.embedding.fastembed_provider import FastembedProvider
         assert FastembedProvider is not None
 
     def test_ollama_provider_module_importable(self):
         """OllamaProvider module is importable."""
-        from memory_etch.embedding.ollama_provider import OllamaProvider
+        from memento.embedding.ollama_provider import OllamaProvider
         assert OllamaProvider is not None

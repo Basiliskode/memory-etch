@@ -7,7 +7,7 @@ Queries facts where ``embedding IS NULL``, encodes them via BGE-M3
 Usage:
     python scripts/backfill_embeddings.py path/to/memory.db [--batch 32]
 
-Requires ``pip install memory-etch[bge-m3]``.
+Requires ``pip install memento[bge-m3]``.
 """
 
 import argparse
@@ -32,10 +32,10 @@ def backfill(db_path: str, batch_size: int = 32) -> int:
         Number of facts backfilled.
     """
     try:
-        from memory_etch.plugins.bge_m3 import BgeM3Plugin
+        from memento.plugins.bge_m3 import BgeM3Plugin
     except ImportError as exc:
         logger.error(
-            "BGE-M3 plugin not available. Install with: pip install memory-etch[bge-m3]\n%s",
+            "BGE-M3 plugin not available. Install with: pip install memento[bge-m3]\n%s",
             exc,
         )
         return 0
@@ -89,7 +89,7 @@ def backfill(db_path: str, batch_size: int = 32) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Backfill missing embedding vectors")
-    parser.add_argument("db_path", type=str, help="Path to Memory Etch SQLite database")
+    parser.add_argument("db_path", type=str, help="Path to memento SQLite database")
     parser.add_argument(
         "--batch",
         type=int,

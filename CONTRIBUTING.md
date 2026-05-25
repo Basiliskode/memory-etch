@@ -1,6 +1,6 @@
-# Contributing to Memory Etch
+# Contributing to memento
 
-Thanks for helping improve Memory Etch. Keep changes small, local-first, and easy to review.
+Thanks for helping improve Memento. Keep changes small, local-first, and easy to review.
 
 ## Quick start
 

@@ -33,7 +33,7 @@ jobs:
       - name: Ruff check
         run: |
           # Temporary baseline: legacy source currently has pre-existing Ruff issues,
-          # especially invalid syntax in src/memory_etch/translator. Keep PR3 scoped
+          # especially invalid syntax in src/memento/translator. Keep PR3 scoped
           # to CI/config tests, then tighten this gate in a later cleanup slice.
           python -m ruff check tests/test_ci_coverage_config.py --no-fix
 
@@ -44,7 +44,7 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest tests/ -v --tb=short --cov=memory_etch --cov-fail-under=80 --cov-report=xml --cov-report=html
+          python -m pytest tests/ -v --tb=short --cov=memento --cov-fail-under=80 --cov-report=xml --cov-report=html
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v7

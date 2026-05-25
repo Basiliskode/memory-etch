@@ -4,8 +4,8 @@ Requires: `python -m pytest tests/test_smarter_search.py -v --tb=short`
 """
 
 import pytest
-from memory_etch import EtchStore, EtchRetriever
-from memory_etch.retrieval import _STOPWORDS, _extract_keywords
+from memento import EtchStore, EtchRetriever
+from memento.retrieval import _STOPWORDS, _extract_keywords
 
 
 # ---------------------------------------------------------------------------

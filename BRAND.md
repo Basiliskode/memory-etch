@@ -136,9 +136,9 @@ Do not use:
 Use a technical-manual structure:
 
 ```md
-> basiliskode://memory-etch
+> basiliskode://memento
 
-# memory-etch
+# memento
 
 LOCAL-FIRST MEMORY FOR AI AGENTS
 
