@@ -4,6 +4,14 @@ import struct
 import pytest
 
 
+try:
+    import fastembed  # noqa: F401
+    _has_fastembed = True
+except ImportError:
+    _has_fastembed = False
+
+
+@pytest.mark.skipif(not _has_fastembed, reason="fastembed not installed — optional dependency")
 class TestStoreWithFastembed:
     """Task 4.4: Integration — FastembedProvider with :memory: store."""
 

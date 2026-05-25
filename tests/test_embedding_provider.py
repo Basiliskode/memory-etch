@@ -74,6 +74,14 @@ class TestNoopProviderDefault:
             store.close()
 
 
+try:
+    import fastembed  # noqa: F401
+    _has_fastembed = True
+except ImportError:
+    _has_fastembed = False
+
+
+@pytest.mark.skipif(not _has_fastembed, reason="fastembed not installed — optional dependency")
 class TestFastembedProvider:
     """Task 1.2, 4.2: FastembedProvider."""
 

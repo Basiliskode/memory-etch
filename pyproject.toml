@@ -50,6 +50,7 @@ include = ["memory_etch*"]
 testpaths = ["tests"]
 addopts = "-v --tb=short -p no:xdist"
 pythonpath = ["src"]
+asyncio_mode = "auto"
 
 # Tests requiring Hermes Agent are excluded by default:
 #   test_etch_e2e.py — EtchMemoryProvider plugin integration

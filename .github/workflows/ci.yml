@@ -28,7 +28,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "setuptools<77" wheel
           python -m pip install -e ".[hrr,mcp]"
-          python -m pip install pytest pytest-cov ruff
+          python -m pip install pytest pytest-cov pytest-asyncio ruff
 
       - name: Ruff check
         run: |
