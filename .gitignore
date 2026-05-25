@@ -42,6 +42,7 @@ scripts/test_adapter_flow.py
 
 # Benchmark outputs
 outputs/
+results/
 benchmark_*.json
 heavy_benchmark_results.json
 
