@@ -81,6 +81,7 @@ def _gc_hard_delete(store, cfg: dict, dry_run: bool) -> dict:
         store._conn.commit()
         if count:
             store._log_event("gc_hard_deleted", metadata={"count": count})
+            store._conn.commit()  # close implicit transaction opened by _log_event
         logger.info("GC hard_delete: %d facts permanently deleted", count)
         return {"deleted": count}
 
@@ -132,6 +133,7 @@ def _gc_orphan_cleanup(store, cfg: dict, dry_run: bool) -> dict:
                 "entities": e_count,
                 "workspaces": ws_count,
             })
+            store._conn.commit()  # close implicit transaction opened by _log_event
         logger.info("GC orphan_cleanup: fact_relations=%d fact_entities=%d entities=%d workspaces=%d",
                     rel_count, fe_count, e_count, ws_count)
         return {"fact_relations": rel_count, "fact_entities": fe_count, "entities": e_count, "workspaces": ws_count}
@@ -156,6 +158,7 @@ def _gc_prune_event_log(store, cfg: dict, dry_run: bool) -> dict:
         store._conn.commit()
         if count:
             store._log_event("gc_event_log_pruned", metadata={"count": count})
+            store._conn.commit()  # close implicit transaction opened by _log_event
         logger.info("GC prune_event_log: %d entries deleted", count)
         return {"deleted": count}
 
@@ -179,6 +182,7 @@ def _gc_prune_turn_buffer(store, cfg: dict, dry_run: bool) -> dict:
         store._conn.commit()
         if count:
             store._log_event("gc_turn_buffer_pruned", metadata={"count": count})
+            store._conn.commit()  # close implicit transaction opened by _log_event
         logger.info("GC prune_turn_buffer: %d entries deleted", count)
         return {"deleted": count}
 
@@ -240,6 +244,7 @@ def _gc_snapshot_retention(store, cfg: dict, dry_run: bool) -> dict:
         store._conn.commit()
         if count:
             store._log_event("gc_snapshots_removed", metadata={"count": count})
+            store._conn.commit()  # close implicit transaction opened by _log_event
         logger.info("GC snapshot_retention: %d snapshots deleted", count)
         return {"deleted": count}
 

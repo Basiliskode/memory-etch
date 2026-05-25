@@ -193,15 +193,14 @@ class TestOrphanCleanup:
     def test_orphan_relations_cleaned(self, store):
         """fact_relations pointing to non-existent facts are removed."""
         store.add_fact("test fact")
-        # Use executescript for PRAGMA so FK changes run outside any open
-        # implicit transaction (execute() on Python <3.12 may open one).
-        store._conn.executescript("PRAGMA foreign_keys=OFF;")
-        store._conn.execute(
-            "INSERT INTO fact_relations (fact_id_a, fact_id_b, relation_type) VALUES (?, ?, ?)",
-            (1, 99999, "related"),
-        )
-        store._conn.commit()  # close implicit tx from INSERT before next PRAGMA
-        store._conn.executescript("PRAGMA foreign_keys=ON;")
+        # Single executescript runs PRAGMA FK OFF → DML → PRAGMA FK ON in one
+        # C-level call, avoiding Python <3.12 implicit transaction interference.
+        store._conn.executescript("""
+            PRAGMA foreign_keys=OFF;
+            INSERT INTO fact_relations (fact_id_a, fact_id_b, relation_type)
+                VALUES (1, 99999, 'related');
+            PRAGMA foreign_keys=ON;
+        """)
         result = store.gc()
         assert result["phases"]["orphan_cleanup"]["fact_relations"] >= 1
         remaining = store._conn.execute(
@@ -212,12 +211,14 @@ class TestOrphanCleanup:
     def test_orphan_fact_entities_cleaned(self, store):
         """fact_entities pointing to non-existent facts are removed."""
         fid = store.add_fact("test fact", entities=["some-entity"])
-        # Use executescript for PRAGMA so FK changes run outside any open
-        # implicit transaction (execute() on Python <3.12 may open one).
-        store._conn.executescript("PRAGMA foreign_keys=OFF;")
-        store._conn.execute("DELETE FROM facts WHERE fact_id = ?", (fid,))
-        store._conn.commit()  # close implicit tx from DELETE before next PRAGMA
-        store._conn.executescript("PRAGMA foreign_keys=ON;")
+        # Single executescript runs PRAGMA FK OFF → DML → PRAGMA FK ON in one
+        # C-level call, avoiding Python <3.12 implicit transaction interference.
+        # fid is an int, safe for string formatting.
+        store._conn.executescript(f"""
+            PRAGMA foreign_keys=OFF;
+            DELETE FROM facts WHERE fact_id = {fid};
+            PRAGMA foreign_keys=ON;
+        """)
         result = store.gc()
         assert result["phases"]["orphan_cleanup"]["fact_entities"] >= 1
 
