@@ -3,7 +3,7 @@
 
 <p/>
     
-# memento
+# Memento Memory
 
 **Memoria persistente local-first para agentes AI.** SQLite + FTS5 + HRR vectors + embeddings opcionales.
 Sin servicios externos, sin GPU, sin API keys.
