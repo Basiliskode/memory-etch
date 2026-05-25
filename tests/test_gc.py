@@ -7,6 +7,13 @@ import pytest
 from memory_etch.store import EtchStore
 
 
+def _exec(conn, sql, params=None):
+    """Execute a single SQL statement — reliable alternative to executescript."""
+    if params:
+        return conn.execute(sql, params)
+    return conn.execute(sql)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
@@ -25,51 +32,61 @@ def store_with_old_data(store):
     for i in range(3):
         fid = store.add_fact(f"old fact {i}", project="test")
         store.soft_delete_fact(fid)
-    store._conn.executescript(
+    store._conn.execute(
         "UPDATE facts SET updated_at = datetime('now', '-60 days') WHERE deleted = 1"
     )
 
     # Old event_log entries
-    store._conn.executescript("""
-        INSERT INTO event_log (event_type, created_at) VALUES
-            ('test_old', datetime('now', '-100 days')),
-            ('test_recent', datetime('now', '-1 hour'));
-    """)
+    store._conn.execute(
+        "INSERT INTO event_log (event_type, created_at) VALUES (?, datetime('now', ?))",
+        ("test_old", "-100 days"),
+    )
+    store._conn.execute(
+        "INSERT INTO event_log (event_type, created_at) VALUES (?, datetime('now', ?))",
+        ("test_recent", "-1 hour"),
+    )
 
     # Old turn_buffer entries
-    store._conn.executescript("""
-        INSERT INTO turn_buffer (session_id, role, content, created_at) VALUES
-            ('s1', 'user', 'old turn', datetime('now', '-60 days')),
-            ('s1', 'user', 'recent turn', datetime('now', '-1 hour'));
-    """)
+    store._conn.execute(
+        "INSERT INTO turn_buffer (session_id, role, content, created_at) VALUES (?, ?, ?, datetime('now', ?))",
+        ("s1", "user", "old turn", "-60 days"),
+    )
+    store._conn.execute(
+        "INSERT INTO turn_buffer (session_id, role, content, created_at) VALUES (?, ?, ?, datetime('now', ?))",
+        ("s1", "user", "recent turn", "-1 hour"),
+    )
 
     # Old snapshots
     store.create_snapshot("old_snap1", project="test")
     store.create_snapshot("old_snap2", project="test")
     store.create_snapshot("old_snap3", project="test")
-    store._conn.executescript(
+    store._conn.execute(
         "UPDATE snapshots SET created_at = datetime('now', '-400 days') WHERE name IN ('old_snap1', 'old_snap2')"
     )
 
     # Orphan data
-    store._conn.executescript(
-        "INSERT INTO entities (name, entity_type) VALUES ('orphan_entity', 'test')"
+    store._conn.execute(
+        "INSERT INTO entities (name, entity_type) VALUES (?, ?)",
+        ("orphan_entity", "test"),
     )
 
     # Orphan workspace (empty, not deleted, old last_active)
     store.create_workspace("empty_old_ws")
-    store._conn.executescript(
-        "UPDATE workspaces SET fact_count = 0, last_active = datetime('now', '-100 days') WHERE name = 'empty_old_ws'"
+    store._conn.execute(
+        "UPDATE workspaces SET fact_count = 0, last_active = datetime('now', '-100 days') WHERE name = ?",
+        ("empty_old_ws",),
     )
 
+    store._conn.commit()  # close any implicit transaction from raw execute calls
     return store
 
 
 def _age_fact(store, fid: int, days_ago: int = 60) -> None:
     """Manually age a fact's updated_at for testing."""
-    store._conn.executescript(f"""
-        UPDATE facts SET updated_at = datetime('now', '-{days_ago} days') WHERE fact_id = {fid};
-    """)
+    store._conn.execute(
+        "UPDATE facts SET updated_at = datetime('now', ? || ' days') WHERE fact_id = ?",
+        (f"-{days_ago}", fid),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -176,12 +193,13 @@ class TestOrphanCleanup:
     def test_orphan_relations_cleaned(self, store):
         """fact_relations pointing to non-existent facts are removed."""
         store.add_fact("test fact")
-        # Use executescript to disable FK enforcement temporarily
-        store._conn.executescript("""
-            PRAGMA foreign_keys=OFF;
-            INSERT INTO fact_relations (fact_id_a, fact_id_b, relation_type) VALUES (1, 99999, 'related');
-            PRAGMA foreign_keys=ON;
-        """)
+        # Disable FK enforcement temporarily via execute
+        store._conn.execute("PRAGMA foreign_keys=OFF")
+        store._conn.execute(
+            "INSERT INTO fact_relations (fact_id_a, fact_id_b, relation_type) VALUES (?, ?, ?)",
+            (1, 99999, "related"),
+        )
+        store._conn.execute("PRAGMA foreign_keys=ON")
         result = store.gc()
         assert result["phases"]["orphan_cleanup"]["fact_relations"] >= 1
         remaining = store._conn.execute(
@@ -192,20 +210,16 @@ class TestOrphanCleanup:
     def test_orphan_fact_entities_cleaned(self, store):
         """fact_entities pointing to non-existent facts are removed."""
         fid = store.add_fact("test fact", entities=["some-entity"])
-        # Use executescript to disable FK enforcement temporarily
-        store._conn.executescript(f"""
-            PRAGMA foreign_keys=OFF;
-            DELETE FROM facts WHERE fact_id = {fid};
-            PRAGMA foreign_keys=ON;
-        """)
+        # Disable FK enforcement temporarily
+        store._conn.execute("PRAGMA foreign_keys=OFF")
+        store._conn.execute("DELETE FROM facts WHERE fact_id = ?", (fid,))
+        store._conn.execute("PRAGMA foreign_keys=ON")
         result = store.gc()
         assert result["phases"]["orphan_cleanup"]["fact_entities"] >= 1
 
     def test_orphan_entities_cleaned(self, store):
         """Entities with no fact_entities are removed."""
-        store._conn.executescript(
-            "INSERT INTO entities (name, entity_type) VALUES ('lonely', 'test')"
-        )
+        _exec(store._conn, "INSERT INTO entities (name, entity_type) VALUES ('lonely', 'test')")
         result = store.gc()
         assert result["phases"]["orphan_cleanup"]["entities"] >= 1
         remaining = store._conn.execute(
@@ -216,7 +230,7 @@ class TestOrphanCleanup:
     def test_empty_workspace_soft_deleted(self, store):
         """Empty old workspace is soft-deleted."""
         store.create_workspace("orphan_ws")
-        store._conn.executescript(
+        _exec(store._conn,
             "UPDATE workspaces SET last_active = datetime('now', '-100 days'), fact_count = 0 WHERE name = 'orphan_ws'"
         )
         result = store.gc()
@@ -233,9 +247,7 @@ class TestOrphanCleanup:
 
     def test_dry_run_orphans(self, store):
         """Dry run reports orphan counts without deleting."""
-        store._conn.executescript(
-            "INSERT INTO entities (name, entity_type) VALUES ('dry_orphan', 'test')"
-        )
+        _exec(store._conn, "INSERT INTO entities (name, entity_type) VALUES ('dry_orphan', 'test')")
         result = store.gc(dry_run=True)
         assert result["phases"]["orphan_cleanup"]["entities"] >= 1
         # Entity should still exist
@@ -246,9 +258,7 @@ class TestOrphanCleanup:
 
     def test_logs_event_on_orphan_cleanup(self, store):
         """gc_orphans_removed event is logged."""
-        store._conn.executescript(
-            "INSERT INTO entities (name, entity_type) VALUES ('log_orphan', 'test')"
-        )
+        _exec(store._conn, "INSERT INTO entities (name, entity_type) VALUES ('log_orphan', 'test')")
         store.gc()
         events = store.get_event_log(event_type="gc_orphans_removed")
         assert len(events) >= 1
@@ -261,7 +271,7 @@ class TestOrphanCleanup:
 class TestPruneEventLog:
     def test_old_entries_deleted(self, store):
         """Event log entries older than prune_event_log_days are deleted."""
-        store._conn.executescript(
+        _exec(store._conn,
             "INSERT INTO event_log (event_type, created_at) VALUES "
             "('test_old', datetime('now', '-100 days'))"
         )
@@ -270,7 +280,7 @@ class TestPruneEventLog:
 
     def test_recent_entries_kept(self, store):
         """Recent event log entries are preserved."""
-        store._conn.executescript(
+        _exec(store._conn,
             "INSERT INTO event_log (event_type, created_at) VALUES "
             "('test_recent', datetime('now', '-1 hour'))"
         )
@@ -282,7 +292,7 @@ class TestPruneEventLog:
 
     def test_dry_run_event_log(self, store):
         """Dry run reports event_log count without deleting."""
-        store._conn.executescript(
+        _exec(store._conn,
             "INSERT INTO event_log (event_type, created_at) VALUES "
             "('dry_test', datetime('now', '-100 days'))"
         )
@@ -295,7 +305,7 @@ class TestPruneEventLog:
 
     def test_logs_event_on_prune(self, store):
         """gc_event_log_pruned event is logged."""
-        store._conn.executescript(
+        _exec(store._conn,
             "INSERT INTO event_log (event_type, created_at) VALUES "
             "('test_log_event', datetime('now', '-100 days'))"
         )
@@ -305,7 +315,7 @@ class TestPruneEventLog:
 
     def test_large_threshold_keeps_all(self, store):
         """A very large prune threshold keeps all entries."""
-        store._conn.executescript(
+        _exec(store._conn,
             "INSERT INTO event_log (event_type, created_at) VALUES "
             "('large_test', datetime('now', '-1 hour'))"
         )
@@ -320,7 +330,7 @@ class TestPruneEventLog:
 class TestPruneTurnBuffer:
     def test_old_entries_deleted(self, store):
         """Turn buffer entries older than prune_turn_buffer_days are deleted."""
-        store._conn.executescript(
+        _exec(store._conn,
             "INSERT INTO turn_buffer (session_id, role, content, created_at) VALUES "
             "('s1', 'user', 'old turn', datetime('now', '-60 days'))"
         )
@@ -329,7 +339,7 @@ class TestPruneTurnBuffer:
 
     def test_recent_entries_kept(self, store):
         """Recent turn buffer entries are preserved."""
-        store._conn.executescript(
+        _exec(store._conn,
             "INSERT INTO turn_buffer (session_id, role, content, created_at) VALUES "
             "('s1', 'user', 'fresh turn', datetime('now', '-1 hour'))"
         )
@@ -341,7 +351,7 @@ class TestPruneTurnBuffer:
 
     def test_dry_run_turn_buffer(self, store):
         """Dry run reports turn_buffer count without deleting."""
-        store._conn.executescript(
+        _exec(store._conn,
             "INSERT INTO turn_buffer (session_id, role, content, created_at) VALUES "
             "('s1', 'user', 'dry turn', datetime('now', '-60 days'))"
         )
@@ -354,7 +364,7 @@ class TestPruneTurnBuffer:
 
     def test_logs_event_on_prune(self, store):
         """gc_turn_buffer_pruned event is logged."""
-        store._conn.executescript(
+        _exec(store._conn,
             "INSERT INTO turn_buffer (session_id, role, content, created_at) VALUES "
             "('s1', 'user', 'log turn', datetime('now', '-60 days'))"
         )
@@ -371,7 +381,7 @@ class TestSnapshotRetention:
     def test_old_snapshots_deleted(self, store):
         """Snapshots older than snapshot_max_age_days are deleted."""
         store.create_snapshot("ancient_snap", project="test")
-        store._conn.executescript(
+        _exec(store._conn,
             "UPDATE snapshots SET created_at = datetime('now', '-400 days') WHERE name = 'ancient_snap'"
         )
         result = store.gc({"snapshot_max_age_days": 30})

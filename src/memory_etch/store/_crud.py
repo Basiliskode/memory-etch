@@ -145,6 +145,7 @@ def update_fact(store, fact_id: int, **kwargs) -> bool:
         store._conn.commit()
         store._log_event("fact_updated", fact_id=fact_id, project=fact_project,
                          metadata={"fields": old_values})
+        store._conn.commit()  # close implicit transaction opened by _log_event
         store._invalidate_hrr_cache(fact_id)
     return True
 
@@ -428,6 +429,7 @@ def add_fact(
             store._invalidate_hrr_cache(dedup_id)
             store._log_event("fact_deduped", fact_id=dedup_id, project=project,
                             metadata={"duplicate_count": original_dup_count + 1, "original_fact_id": dedup_id})
+            store._conn.commit()  # close implicit transaction opened by _log_event
             if project:
                 store._conn.execute(
                     "UPDATE workspaces SET last_active = datetime('now'), updated_at = datetime('now') WHERE name = ?",
@@ -471,6 +473,7 @@ def add_fact(
                 store._invalidate_hrr_cache(eid)
                 store._log_event("fact_added", fact_id=eid, project=project,
                                 metadata={"category": category, "topic_key": topic_key, "scope": scope})
+                store._conn.commit()  # close implicit transaction opened by _log_event
                 if project:
                     store._conn.execute(
                         "UPDATE workspaces SET last_active = datetime('now'), updated_at = datetime('now') WHERE name = ?",
@@ -539,6 +542,7 @@ def add_fact(
             if rid:
                 store._log_event("fact_deduped", fact_id=rid, project=project,
                                 metadata={"original_fact_id": rid, "duplicate_count": 0})
+                store._conn.commit()  # close implicit transaction opened by _log_event
             if return_metadata:
                 return {"id": rid, "status": "dedup"}
             return rid
@@ -546,6 +550,7 @@ def add_fact(
         if fact_id:
             store._log_event("fact_added", fact_id=fact_id, project=project,
                             metadata={"category": category, "topic_key": topic_key, "scope": scope})
+            store._conn.commit()  # close implicit transaction opened by _log_event
 
         if fact_id and hrr.HAS_NUMPY:
             store._pending_hrr.append((fact_id, content))
@@ -558,6 +563,10 @@ def add_fact(
         # Compute embedding if provider is active and not pre-supplied
         if fact_id and embedding is None:
             store._maybe_store_embedding(fact_id, content)
+
+        # Final commit: close any implicit transaction left by _ensure_entity,
+        # _maybe_store_embedding (NoopProvider case), or other DML in this block
+        store._conn.commit()
 
     # ---- Conflict surfacing (outside lock) ----
     if return_metadata and fact_id:
@@ -729,6 +738,7 @@ def add_fact_with_consolidation(
                 store._conn.commit()
                 store._log_event("fact_merged", fact_id=existing_fid, project=project,
                                 metadata={"replaced_fact_id": existing_fid})
+                store._conn.commit()  # close implicit transaction opened by _log_event
             store._invalidate_hrr_cache(existing_fid)
             return {"action": "merged", "fact_id": existing_fid, "detail": f"updated #{existing_fid}"}
 
@@ -740,6 +750,7 @@ def add_fact_with_consolidation(
             with store._lock:
                 store._log_event("fact_replaced", fact_id=fid, project=project,
                                 metadata={"replaced_fact_id": existing_fid})
+                store._conn.commit()  # close implicit transaction opened by _log_event
             # The new fact is derived from the (now-soft-deleted) original
             store._add_derivation_link(existing_fid, fid, judged_by="system")
         return {"action": "merged", "fact_id": fid, "detail": f"replaced #{existing_fid}"}
@@ -775,6 +786,7 @@ def soft_delete_fact(store, fact_id: int, reason: str = "") -> bool:
         if cur.rowcount > 0:
             store._log_event("fact_soft_deleted", fact_id=fact_id, project=fact_project,
                             metadata={"reason": reason})
+            store._conn.commit()  # close implicit transaction opened by _log_event
             if fact_project:
                 store._conn.execute(
                     "UPDATE workspaces SET fact_count = MAX(0, fact_count - 1), last_active = datetime('now'), updated_at = datetime('now') WHERE name = ?",
@@ -810,6 +822,7 @@ def restore_fact(store, fact_id: int) -> bool:
         store._conn.commit()
         if cur.rowcount > 0:
             store._log_event("fact_restored", fact_id=fact_id, project=fact_project, metadata={})
+            store._conn.commit()  # close implicit transaction opened by _log_event
             if fact_project:
                 store._conn.execute(
                     "UPDATE workspaces SET fact_count = fact_count + 1, last_active = datetime('now'), updated_at = datetime('now') WHERE name = ?",
@@ -841,6 +854,7 @@ def remove_fact(store, fact_id: int) -> bool:
         store._conn.commit()
         store._log_event("fact_removed", fact_id=fact_id, project=fact_project,
                         metadata={"permanent": True})
+        store._conn.commit()  # close implicit transaction opened by _log_event
         store._invalidate_hrr_cache(fact_id)
         if fact_project:
             store._conn.execute(
