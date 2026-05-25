@@ -32,61 +32,80 @@ def store_with_old_data(store):
     for i in range(3):
         fid = store.add_fact(f"old fact {i}", project="test")
         store.soft_delete_fact(fid)
-    store._conn.execute(
-        "UPDATE facts SET updated_at = datetime('now', '-60 days') WHERE deleted = 1"
-    )
 
-    # Old event_log entries
-    store._conn.execute(
-        "INSERT INTO event_log (event_type, created_at) VALUES (?, datetime('now', ?))",
-        ("test_old", "-100 days"),
-    )
-    store._conn.execute(
-        "INSERT INTO event_log (event_type, created_at) VALUES (?, datetime('now', ?))",
-        ("test_recent", "-1 hour"),
-    )
+    # Raw test DML must share the store lock with the background HRR flush
+    # thread. Otherwise SQLite may see two implicit transactions on the same
+    # check_same_thread=False connection on Linux CI.
+    with store._lock:
+        store._conn.execute(
+            "UPDATE facts SET updated_at = datetime('now', '-60 days') WHERE deleted = 1"
+        )
 
-    # Old turn_buffer entries
-    store._conn.execute(
-        "INSERT INTO turn_buffer (session_id, role, content, created_at) VALUES (?, ?, ?, datetime('now', ?))",
-        ("s1", "user", "old turn", "-60 days"),
-    )
-    store._conn.execute(
-        "INSERT INTO turn_buffer (session_id, role, content, created_at) VALUES (?, ?, ?, datetime('now', ?))",
-        ("s1", "user", "recent turn", "-1 hour"),
-    )
+        # Old event_log entries
+        store._conn.execute(
+            "INSERT INTO event_log (event_type, created_at) VALUES (?, datetime('now', ?))",
+            ("test_old", "-100 days"),
+        )
+        store._conn.execute(
+            "INSERT INTO event_log (event_type, created_at) VALUES (?, datetime('now', ?))",
+            ("test_recent", "-1 hour"),
+        )
+
+        # Old turn_buffer entries
+        store._conn.execute(
+            "INSERT INTO turn_buffer (session_id, role, content, created_at) "
+            "VALUES (?, ?, ?, datetime('now', ?))",
+            ("s1", "user", "old turn", "-60 days"),
+        )
+        store._conn.execute(
+            "INSERT INTO turn_buffer (session_id, role, content, created_at) "
+            "VALUES (?, ?, ?, datetime('now', ?))",
+            ("s1", "user", "recent turn", "-1 hour"),
+        )
+
+        store._conn.commit()
 
     # Old snapshots
     store.create_snapshot("old_snap1", project="test")
     store.create_snapshot("old_snap2", project="test")
     store.create_snapshot("old_snap3", project="test")
-    store._conn.execute(
-        "UPDATE snapshots SET created_at = datetime('now', '-400 days') WHERE name IN ('old_snap1', 'old_snap2')"
-    )
 
-    # Orphan data
-    store._conn.execute(
-        "INSERT INTO entities (name, entity_type) VALUES (?, ?)",
-        ("orphan_entity", "test"),
-    )
+    with store._lock:
+        store._conn.execute(
+            "UPDATE snapshots SET created_at = datetime('now', '-400 days') "
+            "WHERE name IN ('old_snap1', 'old_snap2')"
+        )
+
+        # Orphan data
+        store._conn.execute(
+            "INSERT INTO entities (name, entity_type) VALUES (?, ?)",
+            ("orphan_entity", "test"),
+        )
+
+        store._conn.commit()
 
     # Orphan workspace (empty, not deleted, old last_active)
     store.create_workspace("empty_old_ws")
-    store._conn.execute(
-        "UPDATE workspaces SET fact_count = 0, last_active = datetime('now', '-100 days') WHERE name = ?",
-        ("empty_old_ws",),
-    )
+    with store._lock:
+        store._conn.execute(
+            "UPDATE workspaces "
+            "SET fact_count = 0, last_active = datetime('now', '-100 days') "
+            "WHERE name = ?",
+            ("empty_old_ws",),
+        )
 
-    store._conn.commit()  # close any implicit transaction from raw execute calls
+        store._conn.commit()  # close any implicit transaction from raw execute calls
     return store
 
 
 def _age_fact(store, fid: int, days_ago: int = 60) -> None:
     """Manually age a fact's updated_at for testing."""
-    store._conn.execute(
-        "UPDATE facts SET updated_at = datetime('now', ? || ' days') WHERE fact_id = ?",
-        (f"-{days_ago}", fid),
-    )
+    with store._lock:
+        store._conn.execute(
+            "UPDATE facts SET updated_at = datetime('now', ? || ' days') WHERE fact_id = ?",
+            (f"-{days_ago}", fid),
+        )
+        store._conn.commit()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -235,8 +254,11 @@ class TestOrphanCleanup:
     def test_empty_workspace_soft_deleted(self, store):
         """Empty old workspace is soft-deleted."""
         store.create_workspace("orphan_ws")
-        _exec(store._conn,
-            "UPDATE workspaces SET last_active = datetime('now', '-100 days'), fact_count = 0 WHERE name = 'orphan_ws'"
+        _exec(
+            store._conn,
+            "UPDATE workspaces "
+            "SET last_active = datetime('now', '-100 days'), fact_count = 0 "
+            "WHERE name = 'orphan_ws'",
         )
         result = store.gc()
         assert result["phases"]["orphan_cleanup"]["workspaces"] >= 1
@@ -246,7 +268,7 @@ class TestOrphanCleanup:
     def test_active_workspace_not_cleaned(self, store):
         """Workspace with recent activity is not soft-deleted."""
         store.add_fact("active ws fact", project="active_ws")
-        result = store.gc()
+        store.gc()
         ws = store.get_workspace("active_ws")
         assert ws is not None
 
@@ -289,7 +311,7 @@ class TestPruneEventLog:
             "INSERT INTO event_log (event_type, created_at) VALUES "
             "('test_recent', datetime('now', '-1 hour'))"
         )
-        result = store.gc({"prune_event_log_days": 30})
+        store.gc({"prune_event_log_days": 30})
         remaining = store._conn.execute(
             "SELECT COUNT(*) FROM event_log WHERE event_type = 'test_recent'"
         ).fetchone()[0]
@@ -348,7 +370,7 @@ class TestPruneTurnBuffer:
             "INSERT INTO turn_buffer (session_id, role, content, created_at) VALUES "
             "('s1', 'user', 'fresh turn', datetime('now', '-1 hour'))"
         )
-        result = store.gc({"prune_turn_buffer_days": 7})
+        store.gc({"prune_turn_buffer_days": 7})
         remaining = store._conn.execute(
             "SELECT COUNT(*) FROM turn_buffer WHERE content = 'fresh turn'"
         ).fetchone()[0]
@@ -386,8 +408,10 @@ class TestSnapshotRetention:
     def test_old_snapshots_deleted(self, store):
         """Snapshots older than snapshot_max_age_days are deleted."""
         store.create_snapshot("ancient_snap", project="test")
-        _exec(store._conn,
-            "UPDATE snapshots SET created_at = datetime('now', '-400 days') WHERE name = 'ancient_snap'"
+        _exec(
+            store._conn,
+            "UPDATE snapshots SET created_at = datetime('now', '-400 days') "
+            "WHERE name = 'ancient_snap'",
         )
         result = store.gc({"snapshot_max_age_days": 30})
         assert result["phases"]["snapshot_retention"]["deleted"] >= 1
