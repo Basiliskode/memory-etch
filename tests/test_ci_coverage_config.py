@@ -80,13 +80,13 @@ def test_ci_workflow_uploads_coverage_artifacts():
 
 
 def test_coveragerc_sets_source_and_omits_non_core_paths():
-    """CI-3: coverage is measured from src and omits tests/plugins/translator."""
+    """CI-3: coverage is measured from src and omits tests/plugins/translator/benchmark."""
     content = COVERAGERC.read_text(encoding="utf-8")
 
     assert "[run]" in content
     assert "source =" in content
     assert "src" in content
-    for omitted in ("*/tests/*", "*/plugins/*", "*/translator_deprecated/*"):
+    for omitted in ("*/tests/*", "*/plugins/*", "*/translator_deprecated/*", "src/memory_etch/benchmark/*"):
         assert omitted in content
 
 

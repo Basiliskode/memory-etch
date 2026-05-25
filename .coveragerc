@@ -8,6 +8,7 @@ omit =
     */translator_deprecated/*
     src/memory_etch/classifier.py
     src/memory_etch/viewer.py
+    src/memory_etch/benchmark/*
 
 [report]
 fail_under = 80
