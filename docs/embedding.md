@@ -1,38 +1,40 @@
 # Embedding Vector Search (Optional)
 
-Memory Etch supports **optional embedding vector search** using the
-[BGE-M3](https://huggingface.co/BAAI/bge-m3) model via
-[fastembed](https://github.com/qdrant/fastembed).
+Memory Etch supports **optional embedding vector search** using
+[fastembed](https://github.com/qdrant/fastembed) or an Ollama embedding server.
 
 This feature is **purely optional** and is never a core dependency.
-Without it, Memory Etch works exactly as before — FTS5-first with HRR
-and Jaccard re-ranking.
+Without it, Memory Etch works exactly as before — FTS5-first, with optional HRR
+and Jaccard re-ranking when the `hrr` extra is installed.
 
 ## Installation
 
 ```bash
-pip install memory-etch[bge-m3]
+pip install "memory-etch[embeddings]"
 ```
 
-This installs `fastembed>=0.5.0` which pulls ONNX Runtime (~150 MB on disk).
-**No model is downloaded at install time.** The model is downloaded on the
-first call to `BgeM3Plugin.encode()`.
+This installs `fastembed>=0.5.0` and `httpx>=0.27`. `fastembed` pulls ONNX Runtime
+(~150 MB on disk). **No model is downloaded at install time.** Models are
+downloaded lazily on first use.
 
 > **System Requirements**: BGE-M3 requires ~2 GB of RAM at inference time.
 > It runs entirely on CPU via ONNX Runtime — no GPU needed.
 
 ## Usage
 
-### 1. Basic encoding
+### 1. Basic provider usage
 
 ```python
-from memory_etch.plugins.bge_m3 import BgeM3Plugin
+from memory_etch import EtchStore
+from memory_etch.embedding import FastembedProvider, OllamaProvider
 
-plugin = BgeM3Plugin()
+store = EtchStore("memory.db", embedding_provider=FastembedProvider())
 
-# First call triggers model download (cached thereafter)
-vec = plugin.encode("Your text here")
-assert len(vec) == 1024  # BGE-M3 dimension
+# Or use an existing Ollama server.
+store = EtchStore(
+    "memory.db",
+    embedding_provider=OllamaProvider(model="nomic-embed-text"),
+)
 ```
 
 ### 2. Wire into EtchRetriever
@@ -114,9 +116,15 @@ and stores the BLOB vectors.
 | Extra | Dependency | Purpose |
 |-------|-----------|---------|
 | `[hrr]` | numpy ≥ 1.24.0 | HRR vector similarity |
-| `[bge-m3]` | fastembed ≥ 0.5.0 | BGE-M3 embedding search |
-| `[embedding]` | fastembed ≥ 0.5.0 | Deprecated alias for [bge-m3] |
-| `[all]` | hrr + bge-m3 | Everything |
+| `[embedding]` | fastembed ≥ 0.5.0, httpx ≥ 0.27 | Fastembed and Ollama providers |
+| `[embeddings]` | fastembed ≥ 0.5.0, httpx ≥ 0.27, numpy ≥ 1.24.0 | Dense embeddings plus numeric helpers |
+| `[bge-m3]` | fastembed ≥ 0.5.0 | Legacy BGE-M3 plugin support |
+| `[mcp]` | mcp ≥ 1.0.0 | MCP stdio server |
+| `[benchmark]` | google-genai ≥ 2.4.0 | Synthetic benchmark runner |
+| `[openai]` | openai ≥ 1.0.0 | OpenAI interceptor support |
+| `[anthropic]` | anthropic ≥ 0.30.0 | Anthropic interceptor support |
+| `[dev]` | build, pytest, pytest-cov, ruff, twine | Local development and release checks |
+| `[all]` | hrr + embeddings + mcp + openai + anthropic | Runtime feature bundle |
 
 ## Security & Privacy
 

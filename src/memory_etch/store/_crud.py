@@ -390,6 +390,7 @@ def add_fact(
     # SHA-256 content hash for lifetime dedup
     content_hash = hashlib.sha256(
         content.encode() + str(project or "").encode()
+        + str(scope or "canonical").encode()
     ).hexdigest()
 
     # Structured field values.
@@ -413,9 +414,9 @@ def add_fact(
         # ---- Content hash dedup (lifetime) ----
         dedup_row = store._conn.execute(
             """SELECT fact_id, duplicate_count FROM facts
-               WHERE content_hash = ? AND project IS ?
+               WHERE content_hash = ? AND project IS ? AND scope IS ?
                AND (deleted IS NULL OR deleted = 0)""",
-            (content_hash, project),
+            (content_hash, project, scope),
         ).fetchone()
         if dedup_row:
             dedup_id = dedup_row["fact_id"]
@@ -500,7 +501,7 @@ def add_fact(
         # ---- Normal INSERT ----
         try:
             cur = store._conn.execute(
-                """INSERT OR IGNORE INTO facts
+                """INSERT INTO facts
                    (content, category, tags, trust_score, importance,
                     project, session_id, topic_key, embedding,
                     what, why, where_text, learned, content_hash,
@@ -517,10 +518,7 @@ def add_fact(
             )
             is_new = cur.rowcount > 0
             store._conn.commit()
-            row = store._conn.execute(
-                "SELECT fact_id FROM facts WHERE content = ?", (content,)
-            ).fetchone()
-            fact_id = row["fact_id"] if row else 0
+            fact_id = cur.lastrowid if is_new else 0
             if project and is_new:
                 store._conn.execute(
                     "UPDATE workspaces SET fact_count = fact_count + 1, last_active = datetime('now'), updated_at = datetime('now') WHERE name = ?",
@@ -621,18 +619,19 @@ def _detect_conflicts(
         params: list[str | int] = [or_query, fact_id]
         project_filter = "AND f.project IS ?"
         params.append(project)
-        rows = store._conn.execute(
-            f"""SELECT f.fact_id, f.content, f.topic_key, fts.rank
-                FROM facts f
-                JOIN facts_fts fts ON fts.rowid = f.fact_id
-                WHERE facts_fts MATCH ?
-                AND f.fact_id != ?
-                AND (f.deleted IS NULL OR f.deleted = 0)
-                {project_filter}
-                ORDER BY fts.rank
-                LIMIT ?""",
-            params + [limit],
-        ).fetchall()
+        with store._lock:
+            rows = store._conn.execute(
+                f"""SELECT f.fact_id, f.content, f.topic_key, fts.rank
+                    FROM facts f
+                    JOIN facts_fts fts ON fts.rowid = f.fact_id
+                    WHERE facts_fts MATCH ?
+                    AND f.fact_id != ?
+                    AND (f.deleted IS NULL OR f.deleted = 0)
+                    {project_filter}
+                    ORDER BY fts.rank
+                    LIMIT ?""",
+                params + [limit],
+            ).fetchall()
 
         conflicts: list[dict] = []
         for row in rows:

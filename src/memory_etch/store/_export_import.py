@@ -27,7 +27,7 @@ def export_memory(store, path: str) -> dict:
             "SELECT fact_id, content, category, tags, trust_score, importance, "
             "project, session_id, topic_key, revision_count, retrieval_count, "
             "consolidated, deleted, deleted_reason, created_at, updated_at, "
-            "fact_type "
+            "what, why, where_text, learned, scope, fact_type "
             "FROM facts ORDER BY fact_id"
         ).fetchall()
 
@@ -46,9 +46,15 @@ def export_memory(store, path: str) -> dict:
             "FROM turn_buffer ORDER BY turn_id"
         ).fetchall()
 
+    exported_facts = []
+    for row in facts:
+        fact = dict(row)
+        fact["where"] = fact.get("where_text", "")
+        exported_facts.append(fact)
+
     data = {
         "version": 1,
-        "facts": [dict(r) for r in facts],
+        "facts": exported_facts,
         "sessions": [dict(r) for r in sessions],
         "relations": [dict(r) for r in relations],
         "turns": [dict(r) for r in turns],
@@ -92,6 +98,11 @@ def import_memory(store, path: str) -> dict:
             project=row.get("project", ""),
             session_id=row.get("session_id", ""),
             topic_key=row.get("topic_key", ""),
+            what=row.get("what", ""),
+            why=row.get("why", ""),
+            where_text=row.get("where", row.get("where_text", "")),
+            learned=row.get("learned", ""),
+            scope=row.get("scope", "canonical"),
             fact_type=row.get("fact_type", ""),
         )
         imported["facts"] += 1

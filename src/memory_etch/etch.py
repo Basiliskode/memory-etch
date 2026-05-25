@@ -130,7 +130,7 @@ class EtchMemoryProvider:
             sqlite3.Error: If the underlying store cannot be initialized.
         """
         self._session_id = session_id
-        db_path = self.config.get("db_path", f"memory_etch_{session_id}.db")
+        db_path = self.config.get("db_path") or f"memory_etch_{session_id}.db"
         self._store = EtchStore(db_path=db_path)
         self._curator = EtchCurator(self._store)
         self._extractor_enabled = self.config.get("auto_extract_llm", False)

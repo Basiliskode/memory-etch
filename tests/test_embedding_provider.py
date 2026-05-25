@@ -1,7 +1,8 @@
 """Tests for embedding provider ABC, NoopProvider, and concrete providers."""
 
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 
 class TestEmbeddingProviderABC:
@@ -41,11 +42,24 @@ class TestEmbeddingProviderABC:
     def test_embedding_provider_has_abstract_methods(self):
         """EmbeddingProvider declares embed and dimension as abstract."""
         import abc
+
         from memory_etch.embedding import EmbeddingProvider
 
         assert issubclass(EmbeddingProvider, abc.ABC)
         assert "embed" in EmbeddingProvider.__abstractmethods__
         assert "dimension" in EmbeddingProvider.__abstractmethods__
+
+    def test_documented_provider_imports_are_exported_lazily(self):
+        """README snippets import concrete providers from memory_etch.embedding."""
+        import sys
+
+        sys.modules.pop("fastembed", None)
+
+        from memory_etch.embedding import FastembedProvider, OllamaProvider
+
+        assert FastembedProvider.__name__ == "FastembedProvider"
+        assert OllamaProvider.__name__ == "OllamaProvider"
+        assert "fastembed" not in sys.modules
 
 
 class TestNoopProviderDefault:
@@ -115,6 +129,7 @@ class TestFastembedProvider:
     def test_fastembed_embed_normalized(self):
         """FastembedProvider returns L2-normalized vectors (norm ≈ 1.0)."""
         import math
+
         from memory_etch.embedding.fastembed_provider import FastembedProvider
 
         provider = FastembedProvider()
@@ -144,17 +159,18 @@ class TestFastembedProvider:
     def test_fastembed_import_lazy(self):
         """FastembedProvider module can be imported without importing fastembed."""
         import sys
-        import importlib
 
         # Clean up
         for mod in list(sys.modules.keys()):
-            if "memory_etch.embedding.fastembed_provider" == mod:
+            if mod == "memory_etch.embedding.fastembed_provider":
                 del sys.modules[mod]
             if mod == "fastembed":
                 del sys.modules[mod]
 
         # Import just the provider module — must not import fastembed
-        from memory_etch.embedding import fastembed_provider as mod2
+        from memory_etch.embedding import fastembed_provider
+
+        assert fastembed_provider is not None
         assert "fastembed" not in sys.modules, (
             "importing the provider module should NOT trigger fastembed import"
         )

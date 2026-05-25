@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_TOML = PROJECT_ROOT / "pyproject.toml"
 PY_TYPED = PROJECT_ROOT / "src" / "memory_etch" / "py.typed"
@@ -22,6 +21,21 @@ def test_version_string_present():
 
     assert isinstance(__version__, str)
     assert len(__version__) > 0
+
+
+def test_runtime_version_matches_package_metadata():
+    """PKG: runtime __version__ mirrors installed package metadata."""
+    from memory_etch import __version__
+
+    assert __version__ == metadata("memory-etch")["Version"]
+
+
+def test_dev_extra_is_defined():
+    """PKG: documented local setup extra exists."""
+    text = PYPROJECT_TOML.read_text(encoding="utf-8")
+    assert "dev =" in text
+    for dep in ("pytest", "ruff", "build", "twine"):
+        assert dep in text
 
 
 def test_python_requires_constraint():
@@ -125,6 +139,14 @@ def test_publish_workflow_has_name():
     """PKG-6: publish.yml contains a name field."""
     content = PUBLISH_YML.read_text(encoding="utf-8")
     assert "name:" in content
+
+
+def test_publish_workflow_validates_distribution_before_publish():
+    """PKG-6: publish workflow checks artifacts before trusted publishing."""
+    content = PUBLISH_YML.read_text(encoding="utf-8")
+    assert "python -m build" in content
+    assert "python -m twine check dist/*" in content
+    assert "python -m pip install dist/*.whl" in content
 
 
 # ── Init check ─────────────────────────────────────────────────────────────

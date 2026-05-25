@@ -5,7 +5,26 @@ implementation. Concrete providers live in sibling modules.
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional
+
+__all__ = [
+    "EmbeddingProvider",
+    "NoopProvider",
+    "FastembedProvider",
+    "OllamaProvider",
+]
+
+
+def __getattr__(name: str):
+    """Lazy exports keep optional embedding dependencies out of base imports."""
+    if name == "FastembedProvider":
+        from .fastembed_provider import FastembedProvider
+
+        return FastembedProvider
+    if name == "OllamaProvider":
+        from .ollama_provider import OllamaProvider
+
+        return OllamaProvider
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class EmbeddingProvider(ABC):
@@ -27,7 +46,7 @@ class EmbeddingProvider(ABC):
 
     def embed_query(self, text: str) -> list[float]:
         """Embed a single query string. Default: delegates to embed().
-        
+
         Override for BGE-style instruction-tuned models that need
         a query prefix (e.g. 'Represent this sentence for searching
         relevant passages: ').
@@ -36,7 +55,7 @@ class EmbeddingProvider(ABC):
 
     def close(self) -> None:
         """Release resources. Default no-op."""
-        pass
+        return None
 
 
 class NoopProvider(EmbeddingProvider):

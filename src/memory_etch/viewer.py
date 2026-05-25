@@ -16,10 +16,11 @@ import os
 import sqlite3
 import sys
 import urllib.parse
+from contextlib import contextmanager
 from pathlib import Path
 
-from .store import EtchStore
 from .curator import EtchCurator
+from .store import EtchStore
 
 logger = logging.getLogger(__name__)
 
@@ -483,13 +484,37 @@ class ViewerHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(HTML_PAGE.encode("utf-8"))
 
-    def _serve_api(self, path: str, qs: dict):
-        db: sqlite3.Connection = self.server._db
+    @contextmanager
+    def _open_db(self):
+        db = sqlite3.connect(str(self.server._db_path), timeout=10)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA busy_timeout=5000")
+        try:
+            yield db
+        finally:
+            db.close()
 
+    def _serve_api(self, path: str, qs: dict):
         if path == "/api/db":
             self._json({"path": str(self.server._db_path)})
+            return
 
-        elif path == "/api/stats":
+        if path == "/api/curator/stats":
+            try:
+                store = EtchStore(db_path=str(self.server._db_path))
+                curator = EtchCurator(store)
+                stats = curator.curate()
+                store.close()
+                self._json({"status": "ok", **stats})
+            except Exception as e:
+                self._json({"status": "error", "detail": str(e)})
+            return
+
+        with self._open_db() as db:
+            self._serve_read_api(db, path, qs)
+
+    def _serve_read_api(self, db: sqlite3.Connection, path: str, qs: dict):
+        if path == "/api/stats":
             def _safe_count(tbl: str, where: str = "", params: tuple = ()) -> int:
                 try:
                     return db.execute(f"SELECT COUNT(*) FROM {tbl} {where}", params).fetchone()[0]
@@ -504,16 +529,6 @@ class ViewerHandler(http.server.BaseHTTPRequestHandler):
                 "fact_count": facts, "session_count": sessions, "relation_count": relations,
                 "extraction_count": extractions, "active_sessions": active,
             })
-
-        elif path == "/api/curator/stats":
-            try:
-                store = EtchStore(db_path=str(self.server._db_path))
-                curator = EtchCurator(store)
-                stats = curator.curate()
-                store.close()
-                self._json({"status": "ok", **stats})
-            except Exception as e:
-                self._json({"status": "error", "detail": str(e)})
 
         elif path == "/api/projects":
             try:
@@ -668,7 +683,7 @@ class ViewerHandler(http.server.BaseHTTPRequestHandler):
 
 
 class ThreadedHTTPServer(http.server.ThreadingHTTPServer):
-    """Threaded HTTP server with reference to the DB connection."""
+    """Threaded HTTP server configured with a database path."""
     allow_reuse_address = True
     daemon_threads = True
 
@@ -690,11 +705,7 @@ def create_viewer_server(
     port: int = 9120,
 ) -> ThreadedHTTPServer:
     """Create a configured viewer server."""
-    conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     server = ThreadedHTTPServer((host, port), ViewerHandler)
-    server._db = conn
     server._db_path = db_path
     return server
 
@@ -728,7 +739,6 @@ def main():
     except KeyboardInterrupt:
         logger.info("Shutting down...")
     finally:
-        server._db.close()
         server.server_close()
 
 

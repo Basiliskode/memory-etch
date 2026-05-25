@@ -1,14 +1,12 @@
 """Tests for the MCP stdio server."""
 
+import json
 import os
 import sys
-import json
 from pathlib import Path
-from typing import AsyncGenerator
 
 import pytest
-from mcp.client.stdio import stdio_client, StdioServerParameters
-
+from mcp.client.stdio import StdioServerParameters, stdio_client
 
 MCP_MODULE = "memory_etch.mcp.__main__"
 
@@ -39,7 +37,7 @@ class TestMCPTools:
 
     @pytest.mark.asyncio
     async def test_list_tools(self, server_params_memory):
-        """Server exposes the expected 6 tools."""
+        """Server exposes the expected 9 tools."""
         async with stdio_client(server_params_memory) as (read, write):
             from mcp import ClientSession
             async with ClientSession(read, write) as session:
@@ -52,6 +50,10 @@ class TestMCPTools:
                 assert "delete_fact" in tool_names
                 assert "get_timeline" in tool_names
                 assert "search_similar" in tool_names
+                assert "list_inbox" in tool_names
+                assert "promote_fact" in tool_names
+                assert "reject_fact" in tool_names
+                assert len(tool_names) == 9
 
     @pytest.mark.asyncio
     async def test_add_fact_and_search_roundtrip(self, server_params_memory):

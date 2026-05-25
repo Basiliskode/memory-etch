@@ -3,6 +3,7 @@
 import hashlib
 
 import pytest
+
 from memory_etch import EtchStore
 
 
@@ -13,19 +14,18 @@ def store():
     s.close()
 
 
-def _content_hash(content: str, project: str = "") -> str:
+def _content_hash(content: str, project: str = "", scope: str = "canonical") -> str:
     """Compute the same content_hash the store would."""
-    return hashlib.sha256(content.encode() + project.encode()).hexdigest()
+    return hashlib.sha256(
+        content.encode() + project.encode() + scope.encode()
+    ).hexdigest()
 
 
 class TestContentHashDedup:
     """Task 2.1 — Content hash dedup (lifetime).
 
-    Note: existing UNIQUE(content) constraint still deduplicates exact content
-    globally. The content_hash mechanism adds LIFETIME dedup and
-    duplicate_count tracking. Same content always returns same fact_id
-    (UNIQUE constraint), and duplicate_count increments whenever
-    content_hash + project match (no time window).
+    The content_hash mechanism provides LIFETIME dedup and duplicate_count
+    tracking within the same project and scope.
     """
 
     def test_same_content_returns_existing_id(self, store):
@@ -65,12 +65,10 @@ class TestContentHashDedup:
 
     def test_same_content_different_project_does_not_increment_duplicate(self, store):
         """Same content, different project: content_hash is different,
-        so duplicate_count stays at 0 (UNIQUE constraint still returns same ID)."""
+        so a distinct fact is created and duplicate_count stays at 0."""
         fid1 = store.add_fact("Shared content", project="proj-x")
         fid2 = store.add_fact("Shared content", project="proj-y")
-        # UNIQUE(content) ensures same row
-        assert fid2 == fid1
-        # But duplicate_count stays 0 since content_hash differs (different project)
+        assert fid2 != fid1
         fact = store.get_fact(fid1)
         assert fact["duplicate_count"] == 0, (
             f"Expected duplicate_count=0 for different projects, "
@@ -112,7 +110,7 @@ class TestContentHashDedup:
         fact = store.get_fact(fid2)
         expected2 = _content_hash("Topic hash v2", "hash-upsert")
         assert fact["content_hash"] == expected2, (
-            f"Topic upsert should update content_hash"
+            "Topic upsert should update content_hash"
         )
 
 
@@ -132,11 +130,12 @@ class TestDedupLifetime:
         fid1 = store.add_fact("Old content dedup", project="old-proj")
 
         # Push the fact back by 120 seconds
-        store._conn.execute(
-            "UPDATE facts SET created_at = datetime('now', '-120 seconds') WHERE fact_id = ?",
-            (fid1,),
-        )
-        store._conn.commit()
+        with store._lock:
+            store._conn.execute(
+                "UPDATE facts SET created_at = datetime('now', '-120 seconds') WHERE fact_id = ?",
+                (fid1,),
+            )
+            store._conn.commit()
 
         # Second add — content_hash dedup hits regardless of age
         fid2 = store.add_fact("Old content dedup", project="old-proj")

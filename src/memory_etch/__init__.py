@@ -17,23 +17,32 @@ Quick start:
     store = EtchStore("memory.db")
     fid = store.add_fact("Hermes Agent uses python-telegram-bot v21",
                          category="project", tags="python,telegram")
-    
+
     retriever = EtchRetriever(store)
     results = retriever.search("telegram bot")
     for r in results:
         print(r["content"], r["_score"])
 """
 
-from .store import EtchStore
-from .retrieval import EtchRetriever
+from . import embedding, hrr, ingest  # noqa: I001
 from .classifier import QueryClassifier
-from .etch import EtchMemoryProvider, _extractor_get_provider_config
-from . import embedding
-from . import hrr
-from . import ingest
 from .embedding import EmbeddingProvider, NoopProvider
+from .etch import EtchMemoryProvider, _extractor_get_provider_config
+from .store import EtchStore
 from .interceptor import InterceptorHandle, intercept, teardown_all
 from .interceptor.generic import GenericInterceptor
+from .retrieval import EtchRetriever
+
+try:
+    from importlib.metadata import PackageNotFoundError, version
+except ImportError:  # pragma: no cover - Python 3.10+ always has importlib.metadata
+    PackageNotFoundError = Exception  # type: ignore[assignment]
+
+
+try:
+    __version__ = version("memory-etch")
+except PackageNotFoundError:
+    __version__ = "1.1.0"
 
 __all__ = [
     "EtchStore",
@@ -50,6 +59,5 @@ __all__ = [
     "intercept",
     "teardown_all",
     "GenericInterceptor",
+    "__version__",
 ]
-
-__version__ = "0.3.0"

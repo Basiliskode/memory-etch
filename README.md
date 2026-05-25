@@ -64,7 +64,7 @@ pip install "memory-etch[mcp]"
 pip install "memory-etch[all]"
 ```
 
-**Requisitos:** Python 3.10+ | Sin GPU | Sin CUDA | Sin runtime externo.
+**Requisitos:** Python 3.10-3.12 | Sin GPU | Sin CUDA | Sin runtime externo.
 
 ---
 
@@ -167,7 +167,7 @@ Cada nivel es opcional, aditivo, y retrocompatible.
 
 | Feature | Descripción |
 |---|---|
-| **MCP Server** | 6 tools (add, search, get, delete, timeline, similar) vía stdio |
+| **MCP Server** | 9 tools vía stdio (facts, search, timeline, similar, inbox review) |
 | **Structured facts** | Campos what/why/where/learned para memorias disciplinadas |
 | **Project detection** | Detecta el proyecto desde git remote automáticamente |
 | **Embedding providers** | Pluggable: NoopProvider, FastembedProvider, OllamaProvider |
@@ -230,9 +230,12 @@ python -m memory_etch.mcp
 | `get_fact` | Obtiene un hecho completo por ID |
 | `delete_fact` | Soft-delete de un hecho |
 | `get_timeline` | Timeline cronológico de una sesión o proyecto |
-| `similar_facts` | Encuentra hechos similares por contenido |
+| `search_similar` | Encuentra hechos similares por contenido |
+| `list_inbox` | Lista hechos en scope `inbox` para revisión |
+| `promote_fact` | Promueve un hecho de `inbox` a `canonical` |
+| `reject_fact` | Rechaza un hecho de `inbox` con soft-delete |
 
-Configuración vía `MEMORY_ETCH_DB_PATH` (default: `memory.db` en el CWD).
+Configuración vía `MEMORY_ETCH_DB_PATH`. Si no está definida, el servidor usa `:memory:` como default; para uso persistente, seteá una ruta explícita como `./memory.db` o `~/.memory-etch/etch.db`.
 
 ---
 

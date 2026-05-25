@@ -4,7 +4,7 @@ Example scripts demonstrating how to use Memory Etch in real-world scenarios.
 
 ## Prerequisites
 
-- Python 3.10+
+- Python 3.10-3.12
 - `pip install memory-etch[hrr]` (adds numpy support for HRR vectors)
 
 ## Running Examples

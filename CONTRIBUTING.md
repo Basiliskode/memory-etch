@@ -8,16 +8,8 @@ Thanks for helping improve Memory Etch. Keep changes small, local-first, and eas
 python -m venv .venv
 .venv\Scripts\activate  # Windows
 python -m pip install --upgrade pip
-python -m pip install -e ".[hrr]" pytest pytest-cov ruff
+python -m pip install -e ".[dev]"
 ```
-
-Preferred once the repository defines a `dev` extra:
-
-```bash
-pip install -e ".[dev]"
-```
-
-The `dev` extra is not defined yet, so install the tools explicitly for now.
 
 ## Before you code
 

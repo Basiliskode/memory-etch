@@ -31,12 +31,13 @@ def _log_event(
     Returns:
         The ``event_id`` of the newly inserted row.
     """
-    cur = store._conn.execute(
-        """INSERT INTO event_log (event_type, fact_id, project, metadata)
-           VALUES (?, ?, ?, ?)""",
-        (event_type, fact_id, project, json.dumps(metadata or {})),
-    )
-    return cur.lastrowid
+    with store._lock:
+        cur = store._conn.execute(
+            """INSERT INTO event_log (event_type, fact_id, project, metadata)
+               VALUES (?, ?, ?, ?)""",
+            (event_type, fact_id, project, json.dumps(metadata or {})),
+        )
+        return cur.lastrowid
 
 
 def get_event_log(

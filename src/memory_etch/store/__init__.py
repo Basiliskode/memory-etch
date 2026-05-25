@@ -124,6 +124,9 @@ class EtchStore:
         Raises:
             sqlite3.Error: If the database cannot be opened or created.
         """
+        if db_path is None or str(db_path).strip() == "":
+            raise ValueError("db_path must be an explicit SQLite path or ':memory:'")
+
         self._db_path = db_path
         self._hrr_dim = hrr_dim
         self._lock = threading.RLock()
@@ -142,6 +145,7 @@ class EtchStore:
         self._hrr_cache_max = 500
 
         # Connect
+        self._closed = False
         self._conn = sqlite3.connect(db_path, check_same_thread=False, timeout=10)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -174,11 +178,19 @@ class EtchStore:
         Stops the HRR flush thread and closes the database connection.
         Call this when done to avoid resource leaks.
         """
+        with self._lock:
+            if self._closed:
+                return
+
         self._hrr_flush_stop.set()
         self._signal_flush()
         if self._hrr_flush_thread and self._hrr_flush_thread.is_alive():
-            self._hrr_flush_thread.join(timeout=3)
-        self._conn.close()
+            self._hrr_flush_thread.join()
+
+        self._flush_pending_hrr_batch()
+        with self._lock:
+            self._conn.close()
+            self._closed = True
 
 
 # ---------------------------------------------------------------------------

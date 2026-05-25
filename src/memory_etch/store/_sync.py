@@ -195,15 +195,18 @@ def sync_apply(store, bundle: dict, strategy: str = "lww") -> dict:
             ]
             for mf in matching_facts:
                 remote_hash = mf.get("content_hash") or hashlib.sha256(
-                    mf["content"].encode() + str(mf.get("project", "")).encode()
+                    mf["content"].encode()
+                    + str(mf.get("project", "")).encode()
+                    + str(mf.get("scope", "canonical")).encode()
                 ).hexdigest()
+                scope = mf.get("scope", "canonical")
                 deleted_hashes.add(remote_hash)
                 local = store._conn.execute(
                     """SELECT fact_id, deleted FROM facts
-                       WHERE content_hash = ? AND project IS ?
+                       WHERE content_hash = ? AND project IS ? AND scope IS ?
                        AND (deleted IS NULL OR deleted = 0)
                        LIMIT 1""",
-                    (remote_hash, mf.get("project", "")),
+                    (remote_hash, mf.get("project", ""), scope),
                 ).fetchone()
                 if local:
                     store._conn.execute(
@@ -222,11 +225,12 @@ def sync_apply(store, bundle: dict, strategy: str = "lww") -> dict:
         for fact in bundle["facts"]:
             content = fact.get("content", "")
             project = fact.get("project", "")
+            scope = fact.get("scope", "canonical")
             # Use the bundle's content_hash when available (preserves identity
             # across instances even when content has diverged). Fall back to
             # recomputing for backward compatibility with older bundles.
             remote_hash = fact.get("content_hash") or hashlib.sha256(
-                content.encode() + str(project).encode()
+                content.encode() + str(project).encode() + str(scope).encode()
             ).hexdigest()
 
             # Skip facts that were already handled via deleted_fact_ids
@@ -235,10 +239,10 @@ def sync_apply(store, bundle: dict, strategy: str = "lww") -> dict:
 
             local = store._conn.execute(
                 """SELECT fact_id, content, updated_at, deleted FROM facts
-                   WHERE content_hash = ? AND project IS ?
+                   WHERE content_hash = ? AND project IS ? AND scope IS ?
                    AND (deleted IS NULL OR deleted = 0)
                    LIMIT 1""",
-                (remote_hash, project),
+                (remote_hash, project, scope),
             ).fetchone()
 
             if not local:
@@ -538,18 +542,16 @@ def sync_with_peer(
             "fact_count": len(bundle["facts"]),
         }
         report["push_result"] = push_meta
-        store._log_event(
-            "sync_push",
-            metadata={
-                "peer": peer_name,
-                "fact_count": len(bundle["facts"]),
-                "cursor_from": cursor,
-                "cursor_to": bundle["until_cursor"],
-            },
-        )
-
-        # Update cursor
         with store._lock:
+            store._log_event(
+                "sync_push",
+                metadata={
+                    "peer": peer_name,
+                    "fact_count": len(bundle["facts"]),
+                    "cursor_from": cursor,
+                    "cursor_to": bundle["until_cursor"],
+                },
+            )
             store._conn.execute(
                 "UPDATE sync_peers SET last_sync_cursor = ?, last_sync_at = datetime('now') WHERE name = ?",
                 (bundle["until_cursor"], peer_name),
@@ -560,17 +562,17 @@ def sync_with_peer(
         if os.path.exists(address):
             pull_report = sync_from_file(store, address, strategy=strategy)
             report["pull_result"] = pull_report
-            store._log_event(
-                "sync_pull",
-                metadata={
-                    "peer": peer_name,
-                    "facts_imported": pull_report.get("facts_imported", 0),
-                    "conflicts": pull_report.get("facts_conflicted", 0),
-                },
-            )
 
             # Update cursor from bundle
             with store._lock:
+                store._log_event(
+                    "sync_pull",
+                    metadata={
+                        "peer": peer_name,
+                        "facts_imported": pull_report.get("facts_imported", 0),
+                        "conflicts": pull_report.get("facts_conflicted", 0),
+                    },
+                )
                 row = store._conn.execute(
                     "SELECT value FROM store_meta WHERE key = 'node_id'"
                 ).fetchone()
@@ -583,9 +585,9 @@ def sync_with_peer(
                             "UPDATE sync_peers SET last_sync_cursor = ?, last_sync_at = datetime('now') WHERE name = ?",
                             (read_bundle.get("until_cursor", cursor), peer_name),
                         )
-                        store._conn.commit()
                 except Exception:
                     pass
+                store._conn.commit()
 
     return report
 
@@ -731,6 +733,7 @@ def resolve_sync_conflict(
                         "keep_content": True,
                     },
                 )
+                store._conn.commit()
         else:
             # Only update metadata, keep local content
             with store._lock:
@@ -774,6 +777,7 @@ def resolve_sync_conflict(
                         "keep_content": False,
                     },
                 )
+                store._conn.commit()
         store._invalidate_hrr_cache(local_fid)
 
     elif resolution == "keep_both":
@@ -817,5 +821,6 @@ def resolve_sync_conflict(
                     "new_fact_id": new_fid,
                 },
             )
+            store._conn.commit()
 
     return True

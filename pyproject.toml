@@ -33,6 +33,7 @@ mcp = ["mcp>=1.0.0"]
 benchmark = ["google-genai>=2.4.0"]
 openai = ["openai>=1.0.0"]
 anthropic = ["anthropic>=0.30.0"]
+dev = ["build>=1.2.0", "pytest>=8.0.0", "pytest-cov>=5.0.0", "ruff>=0.8.0", "twine>=5.0.0"]
 all = ["memory-etch[hrr]", "memory-etch[embeddings]", "memory-etch[mcp]", "memory-etch[openai]", "memory-etch[anthropic]"]
 
 [project.scripts]

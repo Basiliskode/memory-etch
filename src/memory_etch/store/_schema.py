@@ -4,6 +4,7 @@ Extracted from ``EtchStore`` (store.py).  Module-level functions receive
 ``store`` (the EtchStore instance) as first argument.
 """
 
+import hashlib
 import logging
 import re
 
@@ -33,7 +34,7 @@ def _sanitize_fts5(query: str) -> str:
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS facts (
     fact_id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    content         TEXT NOT NULL UNIQUE,
+    content         TEXT NOT NULL,
     category        TEXT DEFAULT 'general',
     tags            TEXT DEFAULT '',
     trust_score     REAL DEFAULT 0.5,
@@ -86,7 +87,7 @@ CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
         VALUES ('delete', old.fact_id, old.content, old.tags);
 END;
 
-CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
+CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE OF content, tags ON facts BEGIN
     INSERT INTO facts_fts(facts_fts, rowid, content, tags)
         VALUES ('delete', old.fact_id, old.content, old.tags);
     INSERT INTO facts_fts(rowid, content, tags)
@@ -200,6 +201,148 @@ def _ensure_schema(store) -> None:
     """Create all tables if they don't exist."""
     store._conn.executescript(_SCHEMA)
     store._conn.commit()
+
+
+def _recreate_fts(store) -> None:
+    """Recreate FTS triggers and rebuild the external-content index."""
+    store._conn.executescript("""
+        DROP TRIGGER IF EXISTS facts_ai;
+        DROP TRIGGER IF EXISTS facts_ad;
+        DROP TRIGGER IF EXISTS facts_au;
+        DROP TABLE IF EXISTS facts_fts;
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts
+            USING fts5(content, tags, content=facts, content_rowid=fact_id);
+
+        CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
+            INSERT INTO facts_fts(rowid, content, tags)
+                VALUES (new.fact_id, new.content, new.tags);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
+            INSERT INTO facts_fts(facts_fts, rowid, content, tags)
+                VALUES ('delete', old.fact_id, old.content, old.tags);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE OF content, tags ON facts BEGIN
+            INSERT INTO facts_fts(facts_fts, rowid, content, tags)
+                VALUES ('delete', old.fact_id, old.content, old.tags);
+            INSERT INTO facts_fts(rowid, content, tags)
+                VALUES (new.fact_id, new.content, new.tags);
+        END;
+    """)
+    store._conn.execute("INSERT INTO facts_fts(facts_fts) VALUES ('rebuild')")
+
+
+def _remove_legacy_content_unique(store) -> None:
+    """Drop the legacy UNIQUE(content) constraint by rebuilding facts."""
+    row = store._conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='facts'"
+    ).fetchone()
+    sql = row["sql"] if row else ""
+    if "UNIQUE" not in sql.upper():
+        return
+
+    logger.info("Migrating schema: removing legacy UNIQUE(content) constraint")
+    store._conn.execute("PRAGMA foreign_keys=OFF")
+    store._conn.executescript("""
+        DROP TRIGGER IF EXISTS facts_ai;
+        DROP TRIGGER IF EXISTS facts_ad;
+        DROP TRIGGER IF EXISTS facts_au;
+        DROP TABLE IF EXISTS facts_fts;
+
+        CREATE TABLE facts_new (
+            fact_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            content         TEXT NOT NULL,
+            category        TEXT DEFAULT 'general',
+            tags            TEXT DEFAULT '',
+            trust_score     REAL DEFAULT 0.5,
+            retrieval_count INTEGER DEFAULT 0,
+            helpful_count   INTEGER DEFAULT 0,
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            hrr_vector      BLOB,
+            embedding       BLOB,
+            reinforcement_count INTEGER DEFAULT 0,
+            consolidated    INTEGER DEFAULT 0,
+            importance      REAL DEFAULT 0.5,
+            session_id      TEXT DEFAULT '',
+            topic_key       TEXT DEFAULT '',
+            revision_count  INTEGER DEFAULT 0,
+            project         TEXT DEFAULT '',
+            deleted         INTEGER DEFAULT 0,
+            deleted_reason  TEXT DEFAULT '',
+            replaced_by     INTEGER DEFAULT NULL,
+            what            TEXT DEFAULT '',
+            why             TEXT DEFAULT '',
+            where_text      TEXT DEFAULT '',
+            learned         TEXT DEFAULT '',
+            content_hash    TEXT DEFAULT '',
+            duplicate_count INTEGER DEFAULT 0,
+            last_retrieved_at TIMESTAMP,
+            source_harness  TEXT DEFAULT '',
+            source_agent    TEXT DEFAULT '',
+            source_kind     TEXT DEFAULT '',
+            scope           TEXT DEFAULT 'canonical',
+            fact_type       TEXT DEFAULT ''
+        );
+
+        INSERT INTO facts_new (
+            fact_id, content, category, tags, trust_score, retrieval_count,
+            helpful_count, created_at, updated_at, hrr_vector, embedding,
+            reinforcement_count, consolidated, importance, session_id,
+            topic_key, revision_count, project, deleted, deleted_reason,
+            replaced_by, what, why, where_text, learned, content_hash,
+            duplicate_count, last_retrieved_at, source_harness, source_agent,
+            source_kind, scope, fact_type
+        )
+        SELECT
+            fact_id, content, category, tags, trust_score, retrieval_count,
+            helpful_count, created_at, updated_at, hrr_vector, embedding,
+            reinforcement_count, consolidated, importance, session_id,
+            topic_key, revision_count, project, deleted, deleted_reason,
+            replaced_by, what, why, where_text, learned, content_hash,
+            duplicate_count, last_retrieved_at, source_harness, source_agent,
+            source_kind, scope, fact_type
+        FROM facts;
+
+        DROP TABLE facts;
+        ALTER TABLE facts_new RENAME TO facts;
+    """)
+    store._conn.execute("PRAGMA foreign_keys=ON")
+    _recreate_fts(store)
+    # Recreate indexes lost during table rebuild
+    store._conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_facts_trust ON facts(trust_score DESC)"
+    )
+    store._conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_facts_category ON facts(category)"
+    )
+    store._conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_facts_content_hash "
+        "ON facts(content_hash, project)"
+    )
+    store._conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_facts_last_retrieved "
+        "ON facts(last_retrieved_at)"
+    )
+
+
+def _refresh_content_hashes(store) -> None:
+    """Recompute content hashes with project and scope as dedup boundaries."""
+    rows = store._conn.execute(
+        "SELECT fact_id, content, project, scope FROM facts"
+    ).fetchall()
+    for row in rows:
+        content_hash = hashlib.sha256(
+            row["content"].encode()
+            + str(row["project"] or "").encode()
+            + str(row["scope"] or "canonical").encode()
+        ).hexdigest()
+        store._conn.execute(
+            "UPDATE facts SET content_hash = ? WHERE fact_id = ?",
+            (content_hash, row["fact_id"]),
+        )
 
 
 def _migrate_schema(store) -> None:
@@ -408,6 +551,10 @@ def _migrate_schema(store) -> None:
         "CREATE INDEX IF NOT EXISTS idx_facts_last_retrieved "
         "ON facts(last_retrieved_at)"
     )
+
+    _remove_legacy_content_unique(store)
+    _refresh_content_hashes(store)
+    _recreate_fts(store)
 
     # fact_relations: add 'derived_from' to CHECK constraint
     if "fact_relations" in tables:

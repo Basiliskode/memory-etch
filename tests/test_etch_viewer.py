@@ -5,28 +5,23 @@ import time
 import urllib.error
 import urllib.request
 from http.server import HTTPServer
-from pathlib import Path
 
 import pytest
 
-from memory_etch.viewer import ViewerHandler, find_db_path
+from memory_etch.store import EtchStore
+from memory_etch.viewer import ThreadedHTTPServer, ViewerHandler
 
 
 @pytest.fixture(scope="module")
 def viewer_server(tmp_path_factory):
     """Start a viewer server for the duration of the module."""
-    import sqlite3
     db_file = tmp_path_factory.mktemp("etch") / "etch_memory.db"
-    from memory_etch.store import EtchStore
     store = EtchStore(str(db_file))
     store.add_fact("HermesDM is a D&D bot", category="general", tags="dnd,bot,topic:app")
     store.add_fact("User likes dark mode", category="preference", tags="ui,theme")
     store.add_fact("Flask version is 3.1", category="tech", tags="python,framework")
-    conn = store._conn
-    conn.row_factory = sqlite3.Row
     server = HTTPServer(("127.0.0.1", 0), ViewerHandler)  # random port
     port = server.server_port
-    server._db = conn
     server._db_path = str(db_file)
 
     t = threading.Thread(target=server.serve_forever, daemon=True)
@@ -36,7 +31,23 @@ def viewer_server(tmp_path_factory):
     yield f"http://127.0.0.1:{port}"
 
     server.shutdown()
-    conn.close()
+    store.close()
+
+
+def test_threaded_viewer_server_uses_db_path_without_shared_connection(tmp_path):
+    db_file = tmp_path / "threaded_viewer.db"
+    store = EtchStore(str(db_file))
+    try:
+        store.add_fact("Threaded viewer fact")
+    finally:
+        store.close()
+
+    server = ThreadedHTTPServer(("127.0.0.1", 0), ViewerHandler)
+    server._db_path = str(db_file)
+    try:
+        assert not hasattr(server, "_db")
+    finally:
+        server.server_close()
 
 
 def _get(url):

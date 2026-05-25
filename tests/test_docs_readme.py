@@ -1,6 +1,5 @@
 """Structural tests for README + API docs (v1.0 — Spanish-only)."""
 
-import re
 from pathlib import Path
 
 import pytest
@@ -57,6 +56,24 @@ def test_readme_has_mcp_section():
     assert "MCP" in text, "MCP section missing"
 
 
+def test_readme_mcp_docs_match_current_tools_and_default_db():
+    """README documents the current MCP tool surface and default DB behavior."""
+    text = README.read_text(encoding="utf-8")
+    for tool_name in (
+        "add_fact",
+        "search_facts",
+        "get_fact",
+        "delete_fact",
+        "get_timeline",
+        "search_similar",
+        "list_inbox",
+        "promote_fact",
+        "reject_fact",
+    ):
+        assert f"`{tool_name}`" in text
+    assert "`:memory:`" in text
+
+
 def test_readme_has_embedding_providers():
     """README includes embedding providers documentation."""
     text = README.read_text(encoding="utf-8")
@@ -106,7 +123,7 @@ def test_help_etchstore_runs():
     import importlib
     try:
         mod = importlib.import_module("memory_etch")
-        store_cls = getattr(mod, "EtchStore")
+        store_cls = mod.EtchStore
         help_text = store_cls.__doc__
         assert help_text is not None, "EtchStore has no docstring"
         assert "SQLite" in help_text, "EtchStore docstring missing content"
