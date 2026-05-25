@@ -169,7 +169,7 @@ def test_locomo_extractive_answerer_writes_prediction_and_metadata(tmp_path: Pat
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     result = payload["results"][0]
     assert summary["dry_run"] is False
-    assert summary["prompt_version"] == "locomo-context-only-v1"
+    assert summary["prompt_version"] == "locomo-context-v2"
     assert summary["qa_diagnostics"]["metric_set"] == "local_qa_diagnostics_v1"
     assert result["prediction"] == "Alice painted a blue mug in pottery class."
     assert result["prediction_meta"]["provider"] == "extractive"
@@ -290,7 +290,9 @@ def test_gemini_payload_uses_context_only_prompt():
 
     prompt = payload["contents"][0]["parts"][0]["text"]
     assert payload["systemInstruction"]["parts"][0]["text"] == (
-        "Answer LOCOMO questions using only the supplied context."
+        "Answer LOCOMO questions using only the supplied context. "
+        "If the context uses relative dates (yesterday, last week, next month) "
+        "and a Session timestamp is provided, resolve to absolute dates."
     )
     assert "Use only the retrieved context" in prompt
     assert "Context ID: D1:2" in prompt

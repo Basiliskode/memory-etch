@@ -59,5 +59,5 @@ memory:
 
 ## See Also
 
-- [Memento README](https://github.com/Basiliskode/memento)
+- [Memento README](https://github.com/Basiliskode/Memento-Memory)
 - [Hermes Agent Documentation](https://github.com/Basiliskode/hermes-agent)

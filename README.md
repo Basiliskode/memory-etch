@@ -38,7 +38,7 @@ Los agentes AI necesitan memoria persistente para ser útiles. Pero las opciones
 memento es el punto medio: **SQLite embedded, sin servidores, sin dependencias obligatorias, sin llamadas externas.** Tu información nunca sale de tu máquina.
 
 ```
-pip install memento
+pip install memento-etch
 python -c "from memento import EtchStore; s = EtchStore('memory.db'); print('anda')"
 ```
 
@@ -50,19 +50,13 @@ Eso es todo lo que necesitás para arrancar.
 
 ```bash
 # Mínimo: FTS5 + Jaccard (solo stdlib de Python)
-pip install memento
+pip install memento-etch
 
 # Recomendado: FTS5 + HRR vectors (necesita numpy)
-pip install "memento[hrr]"
-
-# Con embeddings semánticos locales (BGE-small via fastembed)
-pip install "memento[embeddings]"
-
-# Con MCP server (para integrar con agentes vía MCP)
-pip install "memento[mcp]"
-
-# Todo junto
-pip install "memento[all]"
+pip install "memento-etch[hrr]"
+pip install "memento-etch[embeddings]"
+pip install "memento-etch[mcp]"
+pip install "memento-etch[all]"
 ```
 
 **Requisitos:** Python 3.10-3.12 | Sin GPU | Sin CUDA | Sin runtime externo.
@@ -140,8 +134,8 @@ store = EtchStore("project.db", project="auto")
 | **Jaccard** | Re-ranking por n-gramas | incluido en HRR | numpy (opt-in) |
 | **Embeddings** | Búsqueda semántica densa | ~185ms | fastembed (opt-in) |
 
-Por defecto usa solo FTS5 + Jaccard. Con `pip install memento[hrr]` ganás HRR.
-Con `pip install memento[embeddings]` ganás embeddings densos.
+Por defecto usa solo FTS5 + Jaccard. Con `pip install memento-etch[hrr]` ganás HRR.
+Con `pip install memento-etch[embeddings]` ganás embeddings densos.
 Cada nivel es opcional, aditivo, y retrocompatible.
 
 ---
@@ -194,7 +188,7 @@ Tres modos de búsqueda semántica, plug and play:
 store = EtchStore("memory.db")  # NoopProvider por defecto
 
 # 2. Con fastembed (local, ONNX, sin API key)
-#    pip install memento[embeddings]
+#    pip install memento-etch[embeddings]
 from memento.embedding import FastembedProvider
 store = EtchStore("memory.db", embedding_provider=FastembedProvider())
 
@@ -215,28 +209,26 @@ Cada provider se puede usar en cualquier combinación con el MCP server.
 Para integrar memento con cualquier agente que soporte MCP (Claude Code, Codex, Gemini CLI, etc.):
 
 ```bash
-pip install "memento[mcp]"
+pip install "memento-etch[mcp]"
 
 # Con variable de entorno
-set memento_DB_PATH=./memory.db
+set MEMENTO_DB_PATH=./memory.db
 python -m memento.mcp
 ```
 
-**Tools disponibles:**
+Herramientas MCP expuestas:
 
-| Tool | Descripción |
-|---|---|
-| `add_fact` | Guarda un hecho con contenido, proyecto, y metadatos opcionales |
-| `search_facts` | Búsqueda híbrida con FTS5 + HRR + mode="auto" |
-| `get_fact` | Obtiene un hecho completo por ID |
-| `delete_fact` | Soft-delete de un hecho |
-| `get_timeline` | Timeline cronológico de una sesión o proyecto |
-| `search_similar` | Encuentra hechos similares por contenido |
-| `list_inbox` | Lista hechos en scope `inbox` para revisión |
-| `promote_fact` | Promueve un hecho de `inbox` a `canonical` |
-| `reject_fact` | Rechaza un hecho de `inbox` con soft-delete |
+- `add_fact`
+- `search_facts`
+- `get_fact`
+- `delete_fact`
+- `get_timeline`
+- `search_similar`
+- `list_inbox`
+- `promote_fact`
+- `reject_fact`
 
-Configuración vía `memento_DB_PATH`. Si no está definida, el servidor usa `:memory:` como default; para uso persistente, seteá una ruta explícita como `./memory.db` o `~/.memento/etch.db`.
+Configuración vía `MEMENTO_DB_PATH`. Si no está definida, el servidor usa `:memory:` como default; para uso persistente, seteá una ruta explícita como `./memory.db` o `~/.memento/etch.db`.
 
 ---
 
@@ -378,7 +370,7 @@ Benchmark reproducible:
 
 ```bash
 set GEMINI_API_KEY=...
-pip install "memento[hrr]"
+pip install "memento-etch[hrr]"
 python scripts/run_amb_benchmark.py --n-docs 100 --verbose
 ```
 
@@ -418,8 +410,8 @@ Documentación detallada en [`docs/api/`](docs/api/):
 ## Contribuir
 
 ```bash
-git clone https://github.com/Basiliskode/memento
-cd memento
+git clone https://github.com/Basiliskode/Memento-Memory
+cd Memento-Memory
 pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
@@ -439,6 +431,6 @@ MIT. Construí algo útil.
 > Si estás construyendo un agente que necesite memoria, probalo. Son 30 segundos.
 >
 > ```bash
-> pip install "memento[hrr]"
+> pip install "memento-etch[hrr]"
 > python -c "from memento import EtchStore; s = EtchStore('test.db'); print('anda')"
 > ```

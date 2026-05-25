@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "memento-etch"
-version = "1.1.0"
+version = "1.1.1"
 description = "Memoria persistente local-first para agentes AI — SQLite + FTS5 + HRR + embeddings opcionales"
 readme = "README.md"
 license = "MIT"
@@ -40,8 +40,8 @@ all = ["memento-etch[hrr]", "memento-etch[embeddings]", "memento-etch[mcp]", "me
 etch-viewer = "memento.viewer:main"
 
 [project.urls]
-"Homepage" = "https://github.com/Basiliskode/memento"
-"Source" = "https://github.com/Basiliskode/memento"
+"Homepage" = "https://github.com/Basiliskode/Memento-Memory"
+"Source" = "https://github.com/Basiliskode/Memento-Memory"
 
 [tool.setuptools.packages.find]
 where = ["src"]

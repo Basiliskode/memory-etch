@@ -40,9 +40,9 @@ except ImportError:  # pragma: no cover - Python 3.10+ always has importlib.meta
 
 
 try:
-    __version__ = version("memento")
+    __version__ = version("memento-etch")
 except PackageNotFoundError:
-    __version__ = "1.1.0"
+    __version__ = "1.1.1"
 
 __all__ = [
     "EtchStore",
