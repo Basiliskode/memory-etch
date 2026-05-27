@@ -418,6 +418,45 @@ class EtchMemoryProvider:
                     self._store._conn.commit()
             return json.dumps({"fact_id": fid, "feedback": "recorded"})
 
+        elif action == "atlas":
+            if not self._store:
+                return json.dumps({"error": "Provider not initialized"})
+            op = args.get("operation", "")
+            if op == "create_map":
+                mid = self._store.create_map(
+                    name=args.get("name", ""),
+                    description=args.get("description", ""),
+                    tags=args.get("tags", ""),
+                    project=args.get("project", ""),
+                )
+                return json.dumps({"map_id": mid, "action": "map_created"})
+            elif op == "link_fact":
+                eid = self._store.link_fact(
+                    map_id=args.get("map_id", 0),
+                    fact_id=args.get("fact_id", 0),
+                    relation_type=args.get("relation_type", "contains"),
+                )
+                return json.dumps({"edge_id": eid, "action": "fact_linked"})
+            elif op == "explore":
+                from .retrieval import EtchRetriever
+                retriever = EtchRetriever(self._store)
+                results = retriever.explore_map(
+                    map_id=args.get("map_id", 0),
+                    max_depth=args.get("max_depth", 3),
+                )
+                return json.dumps({"count": len(results), "results": results}, default=str)
+            elif op == "list_maps":
+                maps = self._store.list_maps(project=args.get("project", ""))
+                return json.dumps({"count": len(maps), "maps": maps}, default=str)
+            elif op == "search_map":
+                results = self._store.search_map(
+                    query=args.get("query", ""),
+                    limit=args.get("limit", 20),
+                    project=args.get("project", ""),
+                )
+                return json.dumps({"count": len(results), "results": results}, default=str)
+            return json.dumps({"error": f"Unknown atlas operation: {op}"})
+
         return json.dumps({"error": f"Unknown action: {action}"})
 
     def _handle_extractor_status(self) -> str:

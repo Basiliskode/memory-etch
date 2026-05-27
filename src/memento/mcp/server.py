@@ -319,6 +319,124 @@ def promote_fact(fact_id: int) -> str:
 
 
 @server.tool()
+def read_map(map_id: int) -> str:
+    """Get a full atlas map with its regions and edges.
+
+    Args:
+        map_id: The map ID to read.
+
+    Returns:
+        JSON string with the full map data, or ``{"status": "not_found"}``.
+    """
+    store = get_store()
+    m = store.get_map(map_id)
+    if m is None:
+        return json.dumps({"status": "not_found"})
+    m["regions"] = store.list_regions(map_id)
+    m["edges"] = store.get_edges()
+    return json.dumps(m, default=str)
+
+
+@server.tool()
+def list_maps(project: str = "") -> str:
+    """List all atlas maps, optionally filtered by project.
+
+    Args:
+        project: Optional project filter.
+
+    Returns:
+        JSON array of map dicts.
+    """
+    store = get_store()
+    maps = store.list_maps(project=project)
+    return json.dumps(maps, default=str)
+
+
+@server.tool()
+def create_map(
+    name: str,
+    description: str = "",
+    tags: str = "",
+    project: str = "",
+) -> str:
+    """Create a new atlas map.
+
+    Args:
+        name: Map name.
+        description: Optional description.
+        tags: Comma-separated tags.
+        project: Optional project namespace.
+
+    Returns:
+        JSON string with ``{"map_id": int}``.
+    """
+    store = get_store()
+    mid = store.create_map(name=name, description=description,
+                           tags=tags, project=project)
+    return json.dumps({"map_id": mid})
+
+
+@server.tool()
+def link_fact(
+    map_id: int,
+    fact_id: int,
+    relation_type: str = "contains",
+    weight: float = 0.5,
+) -> str:
+    """Link a fact to an atlas map.
+
+    Args:
+        map_id: The map ID.
+        fact_id: The fact ID.
+        relation_type: Edge type (default: 'contains').
+        weight: Edge weight 0.0–1.0 (default: 0.5).
+
+    Returns:
+        JSON string with ``{"edge_id": int}``.
+    """
+    store = get_store()
+    eid = store.link_fact(map_id=map_id, fact_id=fact_id,
+                           relation_type=relation_type, weight=weight)
+    return json.dumps({"edge_id": eid})
+
+
+@server.tool()
+def search_map(
+    query: str,
+    limit: int = 20,
+    project: str = "",
+) -> str:
+    """Full-text search across atlas maps.
+
+    Args:
+        query: Search query.
+        limit: Max results (default: 20).
+        project: Optional project filter.
+
+    Returns:
+        JSON array of map summary dicts.
+    """
+    store = get_store()
+    results = store.search_map(query=query, limit=limit, project=project)
+    return json.dumps(results, default=str)
+
+
+@server.tool()
+def list_regions(map_id: int) -> str:
+    """List all regions in a map.
+
+    Args:
+        map_id: The parent map ID.
+
+    Returns:
+        JSON array of region dicts.
+    """
+    store = get_store()
+    regions = store.list_regions(map_id)
+    return json.dumps(regions, default=str)
+
+
+@server.tool()
 def reject_fact(fact_id: int, reason: str = "") -> str:
     """Reject an inbox fact (soft-delete with reason).
 

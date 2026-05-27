@@ -77,6 +77,18 @@ def create_snapshot(
             "SELECT * FROM workspaces ORDER BY workspace_id",
         ).fetchall()
 
+        atlas_maps = store._conn.execute(
+            "SELECT * FROM atlas_maps ORDER BY map_id",
+        ).fetchall()
+
+        atlas_regions = store._conn.execute(
+            "SELECT * FROM atlas_regions ORDER BY region_id",
+        ).fetchall()
+
+        atlas_edges = store._conn.execute(
+            "SELECT * FROM atlas_edges ORDER BY edge_id",
+        ).fetchall()
+
     # Build data dict (outside lock — no DB access)
     data = {
         "version": 2,
@@ -88,6 +100,9 @@ def create_snapshot(
         "turns": [dict(r) for r in turns],
         "event_log": [dict(r) for r in event_log],
         "workspaces": [dict(r) for r in workspaces],
+        "atlas_maps": [dict(r) for r in atlas_maps],
+        "atlas_regions": [dict(r) for r in atlas_regions],
+        "atlas_edges": [dict(r) for r in atlas_edges],
     }
 
     # If project is non-empty, filter facts to only that project
@@ -178,10 +193,14 @@ def restore_snapshot(store, name: str, merge: bool = False) -> dict:
         relations_data = data.get("relations", [])
         turns_data = data.get("turns", [])
         workspaces_data = data.get("workspaces", [])
+        atlas_maps_data = data.get("atlas_maps", [])
+        atlas_regions_data = data.get("atlas_regions", [])
+        atlas_edges_data = data.get("atlas_edges", [])
         restored_event_log = data.get("event_log", [])
 
         if not merge:
-            for table in ("facts", "sessions", "fact_relations", "turn_buffer", "event_log", "workspaces"):
+            for table in ("facts", "sessions", "fact_relations", "turn_buffer", "event_log", "workspaces",
+                          "atlas_maps", "atlas_regions", "atlas_edges"):
                 store._conn.execute(f"DELETE FROM {table}")
             store._conn.commit()
 
@@ -253,6 +272,53 @@ def restore_snapshot(store, name: str, merge: bool = False) -> dict:
                 ),
             )
 
+        for am_row in atlas_maps_data:
+            store._conn.execute(
+                """INSERT OR IGNORE INTO atlas_maps
+                   (map_id, name, description, tags, project, metadata,
+                    node_count, created_at, updated_at, deleted)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    am_row["map_id"], am_row["name"],
+                    am_row.get("description", ""), am_row.get("tags", ""),
+                    am_row.get("project", ""), am_row.get("metadata", "{}"),
+                    am_row.get("node_count", 0), am_row.get("created_at"),
+                    am_row.get("updated_at"), am_row.get("deleted", 0),
+                ),
+            )
+
+        for ar_row in atlas_regions_data:
+            store._conn.execute(
+                """INSERT OR IGNORE INTO atlas_regions
+                   (region_id, map_id, parent_region_id, name, description,
+                    tags, fact_count, created_at, deleted)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    ar_row["region_id"], ar_row["map_id"],
+                    ar_row.get("parent_region_id"), ar_row["name"],
+                    ar_row.get("description", ""), ar_row.get("tags", ""),
+                    ar_row.get("fact_count", 0), ar_row.get("created_at"),
+                    ar_row.get("deleted", 0),
+                ),
+            )
+
+        for ae_row in atlas_edges_data:
+            store._conn.execute(
+                """INSERT OR IGNORE INTO atlas_edges
+                   (edge_id, map_id, source_type, source_id, target_type,
+                    target_id, relation_type, weight, metadata, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    ae_row["edge_id"], ae_row["map_id"],
+                    ae_row["source_type"], ae_row["source_id"],
+                    ae_row["target_type"], ae_row["target_id"],
+                    ae_row.get("relation_type", "contains"),
+                    ae_row.get("weight", 0.5),
+                    ae_row.get("metadata", "{}"),
+                    ae_row.get("created_at"),
+                ),
+            )
+
         store._conn.commit()
         store._log_event(
             "snapshot_restored",
@@ -265,6 +331,9 @@ def restore_snapshot(store, name: str, merge: bool = False) -> dict:
         "relations_restored": len(relations_data),
         "turns_restored": len(turns_data),
         "workspaces_restored": len(workspaces_data),
+        "atlas_maps_restored": len(atlas_maps_data),
+        "atlas_regions_restored": len(atlas_regions_data),
+        "atlas_edges_restored": len(atlas_edges_data),
     }
 
 
@@ -393,4 +462,7 @@ def snapshot_diff(store, name_a: str, name_b: str) -> dict:
         "turns": _counts("turns"),
         "event_log": _counts("event_log"),
         "workspaces": _counts("workspaces"),
+        "atlas_maps": _counts("atlas_maps"),
+        "atlas_regions": _counts("atlas_regions"),
+        "atlas_edges": _counts("atlas_edges"),
     }

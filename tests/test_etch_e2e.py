@@ -378,3 +378,105 @@ class TestStoreThroughToolDispatch:
         matched = [f for f in search_data.get("results", []) if f["fact_id"] == fid]
         assert len(matched) == 1
         assert matched[0]["trust_score"] > 0.0
+
+
+class TestAtlasToolDispatch:
+    """Test that atlas operations via handle_tool_call work end-to-end."""
+
+    def test_create_map_via_atlas_dispatch(self, provider):
+        """create_map via atlas action returns map_id with correct shape."""
+        result = provider.handle_tool_call("fact_store", {
+            "action": "atlas",
+            "operation": "create_map",
+            "name": "Atlas Map E2E",
+            "description": "Created via Hermes dispatch",
+            "project": "test",
+        })
+        data = json.loads(result)
+        assert "map_id" in data
+        assert data["map_id"] > 0
+        assert data["action"] == "map_created"
+
+    def test_list_maps_via_atlas_dispatch(self, provider):
+        """list_maps via atlas action returns maps list."""
+        # Create a map first
+        provider.handle_tool_call("fact_store", {
+            "action": "atlas",
+            "operation": "create_map",
+            "name": "Listable Map",
+            "project": "e2e",
+        })
+        result = provider.handle_tool_call("fact_store", {
+            "action": "atlas",
+            "operation": "list_maps",
+            "project": "e2e",
+        })
+        data = json.loads(result)
+        assert "count" in data
+        assert data["count"] >= 1
+        assert "maps" in data
+        assert any(m["name"] == "Listable Map" for m in data["maps"])
+
+    def test_search_map_via_atlas_dispatch(self, provider):
+        """search_map via atlas action finds created map."""
+        provider.handle_tool_call("fact_store", {
+            "action": "atlas",
+            "operation": "create_map",
+            "name": "Searchable Map E2E",
+            "description": "Target for atlas search test",
+            "project": "test",
+        })
+        result = provider.handle_tool_call("fact_store", {
+            "action": "atlas",
+            "operation": "search_map",
+            "query": "searchable",
+            "project": "test",
+        })
+        data = json.loads(result)
+        assert "count" in data
+        assert data["count"] >= 1
+        assert "results" in data
+        assert any(r["name"] == "Searchable Map E2E" for r in data["results"])
+
+    def test_explore_map_via_atlas_dispatch(self, provider):
+        """explore via atlas action returns linked data."""
+        # Create map
+        create_resp = provider.handle_tool_call("fact_store", {
+            "action": "atlas",
+            "operation": "create_map",
+            "name": "Explorable Map",
+            "project": "e2e",
+        })
+        mid = json.loads(create_resp)["map_id"]
+        # Add a fact and link it
+        add_resp = provider.handle_tool_call("fact_store", {
+            "action": "add",
+            "content": "Fact linked to atlas map",
+            "category": "general",
+        })
+        fid = json.loads(add_resp)["fact_id"]
+        provider.handle_tool_call("fact_store", {
+            "action": "atlas",
+            "operation": "link_fact",
+            "map_id": mid,
+            "fact_id": fid,
+        })
+        # Explore the map
+        result = provider.handle_tool_call("fact_store", {
+            "action": "atlas",
+            "operation": "explore",
+            "map_id": mid,
+        })
+        data = json.loads(result)
+        assert "count" in data
+        assert isinstance(data["results"], list)
+
+    def test_atlas_unknown_operation_returns_error(self, provider):
+        """Unknown atlas operation returns error JSON."""
+        result = provider.handle_tool_call("fact_store", {
+            "action": "atlas",
+            "operation": "nonexistent_op",
+        })
+        data = json.loads(result)
+        assert "error" in data
+        assert "nonexistent_op" in data["error"]

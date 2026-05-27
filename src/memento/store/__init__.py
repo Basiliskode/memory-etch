@@ -47,6 +47,7 @@ from . import (
     _sync,
     _gc,
     _compat,
+    _atlas,
 )
 
 logger = logging.getLogger(__name__)
@@ -336,6 +337,30 @@ for _fn_name in ("export_memory", "import_memory", "stats", "projects"):
 
 for _fn_name in ("ingest",):
     setattr(EtchStore, _fn_name, _delegate(getattr(_ingest, _fn_name)))
+
+# ---------------------------------------------------------------------------
+# Phase 6b delegation — Atlas (semantic fact map)
+# ---------------------------------------------------------------------------
+
+for _fn_name in (
+    "create_map",
+    "get_map",
+    "update_map",
+    "delete_map",
+    "list_maps",
+    "create_region",
+    "get_region",
+    "list_regions",
+    "link_fact",
+    "link_region",
+    "unlink",
+    "get_edges",
+    "search_map",
+    "get_map_node",
+    "traverse_path",
+    "map_stats",
+):
+    setattr(EtchStore, _fn_name, _delegate(getattr(_atlas, _fn_name)))
 
 # ---------------------------------------------------------------------------
 # Phase 7 delegation — Sync, Garbage Collection

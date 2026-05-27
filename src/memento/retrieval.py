@@ -927,6 +927,109 @@ class EtchRetriever:
             r["_score"] = r.get("trust_score", 0.5)
         return results
 
+    # ------------------------------------------------------------------
+    # Atlas retrieval methods
+    # ------------------------------------------------------------------
+
+    def explore_map(self, map_id: int, max_depth: int = 3) -> list[dict]:
+        """Explore a map and return its linked facts, regions, and edges.
+
+        Args:
+            map_id: The map ID to explore.
+            max_depth: Maximum depth for edge traversal (default: 3).
+
+        Returns:
+            List of dicts with node_type, node_id, name, and metadata.
+        """
+        results = []
+        # Get the map itself
+        m = self._store.get_map(map_id)
+        if m:
+            results.append({
+                "node_type": "map",
+                "node_id": m["map_id"],
+                "name": m["name"],
+                "description": m.get("description", ""),
+            })
+            # Get regions
+            regions = self._store.list_regions(map_id)
+            for r in regions:
+                results.append({
+                    "node_type": "region",
+                    "node_id": r["region_id"],
+                    "name": r["name"],
+                    "parent_region_id": r.get("parent_region_id"),
+                })
+                # Get edges per region — linked facts
+                edges = self._store.get_edges(node_type="region", node_id=r["region_id"])
+                for e in edges:
+                    if e["target_type"] == "fact":
+                        fact = self._store.get_fact(e["target_id"])
+                        if fact:
+                            results.append({
+                                "node_type": "fact",
+                                "node_id": fact["fact_id"],
+                                "name": fact.get("content", "")[:100],
+                                "relation_type": e["relation_type"],
+                                "weight": e["weight"],
+                            })
+            # Also get edges linked directly to the map
+            edges = self._store.get_edges(node_type="map", node_id=map_id)
+            for e in edges:
+                if e["target_type"] == "fact":
+                    fact = self._store.get_fact(e["target_id"])
+                    if fact:
+                        results.append({
+                            "node_type": "fact",
+                            "node_id": fact["fact_id"],
+                            "name": fact.get("content", "")[:100],
+                            "relation_type": e["relation_type"],
+                            "weight": e["weight"],
+                        })
+        return results
+
+    def traverse_path(
+        self,
+        start_map_id: int,
+        end_map_id: int,
+        max_depth: int = 5,
+    ) -> list[dict]:
+        """Find a path between two maps via atlas edges.
+
+        Delegates to ``store.traverse_path``.
+
+        Args:
+            start_map_id: Starting map ID.
+            end_map_id: Target map ID.
+            max_depth: Maximum traversal depth.
+
+        Returns:
+            List of node dicts on the path, or empty list.
+        """
+        return self._store.traverse_path(start_map_id, end_map_id, max_depth)
+
+    def search_map(
+        self,
+        query: str,
+        limit: int = 20,
+        project: str = "",
+        scope: str = "canonical",
+    ) -> list[dict]:
+        """Full-text search across atlas maps.
+
+        Delegates to ``store.search_map``.
+
+        Args:
+            query: FTS5 search query.
+            limit: Max results (default 20).
+            project: Optional project filter.
+            scope: Ignored for atlas (kept for API compatibility).
+
+        Returns:
+            List of map summary dicts.
+        """
+        return self._store.search_map(query, limit=limit, project=project, scope=scope)
+
     def contradict(self, limit: int = 10) -> list[dict]:
         """Find contradictions — known (fact_relations) then algorithmic.
 

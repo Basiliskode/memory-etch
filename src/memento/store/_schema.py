@@ -194,6 +194,91 @@ CREATE TABLE IF NOT EXISTS fact_schemas (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS atlas_maps (
+    map_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    tags        TEXT DEFAULT '',
+    project     TEXT DEFAULT '',
+    metadata    TEXT DEFAULT '{}',
+    node_count  INTEGER DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted     INTEGER DEFAULT 0
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS atlas_maps_fts
+    USING fts5(name, description, tags, content=atlas_maps, content_rowid=map_id);
+
+CREATE TRIGGER IF NOT EXISTS atlas_maps_ai AFTER INSERT ON atlas_maps BEGIN
+    INSERT INTO atlas_maps_fts(rowid, name, description, tags)
+        VALUES (new.map_id, new.name, new.description, new.tags);
+END;
+
+CREATE TRIGGER IF NOT EXISTS atlas_maps_ad AFTER DELETE ON atlas_maps BEGIN
+    INSERT INTO atlas_maps_fts(atlas_maps_fts, rowid, name, description, tags)
+        VALUES ('delete', old.map_id, old.name, old.description, old.tags);
+END;
+
+CREATE TRIGGER IF NOT EXISTS atlas_maps_au AFTER UPDATE OF name, description, tags ON atlas_maps BEGIN
+    INSERT INTO atlas_maps_fts(atlas_maps_fts, rowid, name, description, tags)
+        VALUES ('delete', old.map_id, old.name, old.description, old.tags);
+    INSERT INTO atlas_maps_fts(rowid, name, description, tags)
+        VALUES (new.map_id, new.name, new.description, new.tags);
+END;
+
+CREATE TABLE IF NOT EXISTS atlas_regions (
+    region_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    map_id          INTEGER NOT NULL REFERENCES atlas_maps(map_id),
+    parent_region_id INTEGER REFERENCES atlas_regions(region_id),
+    name            TEXT NOT NULL,
+    description     TEXT DEFAULT '',
+    tags            TEXT DEFAULT '',
+    fact_count      INTEGER DEFAULT 0,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    deleted         INTEGER DEFAULT 0
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS atlas_regions_fts
+    USING fts5(name, description, tags, content=atlas_regions, content_rowid=region_id);
+
+CREATE TRIGGER IF NOT EXISTS atlas_regions_ai AFTER INSERT ON atlas_regions BEGIN
+    INSERT INTO atlas_regions_fts(rowid, name, description, tags)
+        VALUES (new.region_id, new.name, new.description, new.tags);
+END;
+
+CREATE TRIGGER IF NOT EXISTS atlas_regions_ad AFTER DELETE ON atlas_regions BEGIN
+    INSERT INTO atlas_regions_fts(atlas_regions_fts, rowid, name, description, tags)
+        VALUES ('delete', old.region_id, old.name, old.description, old.tags);
+END;
+
+CREATE TRIGGER IF NOT EXISTS atlas_regions_au AFTER UPDATE OF name, description, tags ON atlas_regions BEGIN
+    INSERT INTO atlas_regions_fts(atlas_regions_fts, rowid, name, description, tags)
+        VALUES ('delete', old.region_id, old.name, old.description, old.tags);
+    INSERT INTO atlas_regions_fts(rowid, name, description, tags)
+        VALUES (new.region_id, new.name, new.description, new.tags);
+END;
+
+CREATE TABLE IF NOT EXISTS atlas_edges (
+    edge_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    map_id        INTEGER NOT NULL REFERENCES atlas_maps(map_id),
+    source_type   TEXT NOT NULL CHECK(source_type IN ('map','region','fact')),
+    source_id     INTEGER NOT NULL,
+    target_type   TEXT NOT NULL CHECK(target_type IN ('map','region','fact')),
+    target_id     INTEGER NOT NULL,
+    relation_type TEXT DEFAULT 'contains',
+    weight        REAL DEFAULT 0.5,
+    metadata      TEXT DEFAULT '{}',
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(map_id, source_type, source_id, target_type, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_atlas_edges_map ON atlas_edges(map_id);
+CREATE INDEX IF NOT EXISTS idx_atlas_edges_source ON atlas_edges(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_atlas_edges_target ON atlas_edges(target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_atlas_regions_map ON atlas_regions(map_id, parent_region_id);
+CREATE INDEX IF NOT EXISTS idx_atlas_maps_project ON atlas_maps(project);
 """
 
 
@@ -630,5 +715,105 @@ def _migrate_schema(store) -> None:
                 resolved_at       TEXT
             );
         """)
+
+    # ------------------------------------------------------------------
+    # Atlas tables (for existing databases before the DDL was added to _SCHEMA)
+    # ------------------------------------------------------------------
+
+    if "atlas_maps" not in tables:
+        logger.info("Migrating schema: creating atlas_maps table")
+        store._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS atlas_maps (
+                map_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                tags        TEXT DEFAULT '',
+                project     TEXT DEFAULT '',
+                metadata    TEXT DEFAULT '{}',
+                node_count  INTEGER DEFAULT 0,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted     INTEGER DEFAULT 0
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS atlas_maps_fts
+                USING fts5(name, description, tags, content=atlas_maps, content_rowid=map_id);
+            CREATE TRIGGER IF NOT EXISTS atlas_maps_ai AFTER INSERT ON atlas_maps BEGIN
+                INSERT INTO atlas_maps_fts(rowid, name, description, tags)
+                    VALUES (new.map_id, new.name, new.description, new.tags);
+            END;
+            CREATE TRIGGER IF NOT EXISTS atlas_maps_ad AFTER DELETE ON atlas_maps BEGIN
+                INSERT INTO atlas_maps_fts(atlas_maps_fts, rowid, name, description, tags)
+                    VALUES ('delete', old.map_id, old.name, old.description, old.tags);
+            END;
+            CREATE TRIGGER IF NOT EXISTS atlas_maps_au AFTER UPDATE OF name, description, tags ON atlas_maps BEGIN
+                INSERT INTO atlas_maps_fts(atlas_maps_fts, rowid, name, description, tags)
+                    VALUES ('delete', old.map_id, old.name, old.description, old.tags);
+                INSERT INTO atlas_maps_fts(rowid, name, description, tags)
+                    VALUES (new.map_id, new.name, new.description, new.tags);
+            END;
+        """)
+
+    if "atlas_regions" not in tables:
+        logger.info("Migrating schema: creating atlas_regions table")
+        store._conn.executescript("""
+            CREATE TABLE IF NOT EXISTS atlas_regions (
+                region_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                map_id          INTEGER NOT NULL REFERENCES atlas_maps(map_id),
+                parent_region_id INTEGER REFERENCES atlas_regions(region_id),
+                name            TEXT NOT NULL,
+                description     TEXT DEFAULT '',
+                tags            TEXT DEFAULT '',
+                fact_count      INTEGER DEFAULT 0,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                deleted         INTEGER DEFAULT 0
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS atlas_regions_fts
+                USING fts5(name, description, tags, content=atlas_regions, content_rowid=region_id);
+            CREATE TRIGGER IF NOT EXISTS atlas_regions_ai AFTER INSERT ON atlas_regions BEGIN
+                INSERT INTO atlas_regions_fts(rowid, name, description, tags)
+                    VALUES (new.region_id, new.name, new.description, new.tags);
+            END;
+            CREATE TRIGGER IF NOT EXISTS atlas_regions_ad AFTER DELETE ON atlas_regions BEGIN
+                INSERT INTO atlas_regions_fts(atlas_regions_fts, rowid, name, description, tags)
+                    VALUES ('delete', old.region_id, old.name, old.description, old.tags);
+            END;
+            CREATE TRIGGER IF NOT EXISTS atlas_regions_au AFTER UPDATE OF name, description, tags ON atlas_regions BEGIN
+                INSERT INTO atlas_regions_fts(atlas_regions_fts, rowid, name, description, tags)
+                    VALUES ('delete', old.region_id, old.name, old.description, old.tags);
+                INSERT INTO atlas_regions_fts(rowid, name, description, tags)
+                    VALUES (new.region_id, new.name, new.description, new.tags);
+            END;
+        """)
+
+    if "atlas_edges" not in tables:
+        logger.info("Migrating schema: creating atlas_edges table")
+        store._conn.execute("""
+            CREATE TABLE IF NOT EXISTS atlas_edges (
+                edge_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                map_id        INTEGER NOT NULL REFERENCES atlas_maps(map_id),
+                source_type   TEXT NOT NULL CHECK(source_type IN ('map','region','fact')),
+                source_id     INTEGER NOT NULL,
+                target_type   TEXT NOT NULL CHECK(target_type IN ('map','region','fact')),
+                target_id     INTEGER NOT NULL,
+                relation_type TEXT DEFAULT 'contains',
+                weight        REAL DEFAULT 0.5,
+                metadata      TEXT DEFAULT '{}',
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(map_id, source_type, source_id, target_type, target_id)
+            )
+        """)
+
+    # Atlas indexes (idempotent — safe to run even if table exists)
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS idx_atlas_edges_map ON atlas_edges(map_id)",
+        "CREATE INDEX IF NOT EXISTS idx_atlas_edges_source ON atlas_edges(source_type, source_id)",
+        "CREATE INDEX IF NOT EXISTS idx_atlas_edges_target ON atlas_edges(target_type, target_id)",
+        "CREATE INDEX IF NOT EXISTS idx_atlas_regions_map ON atlas_regions(map_id, parent_region_id)",
+        "CREATE INDEX IF NOT EXISTS idx_atlas_maps_project ON atlas_maps(project)",
+    ]:
+        try:
+            store._conn.execute(idx_sql)
+        except Exception:
+            pass  # Table may not exist yet, that's fine
 
     store._conn.commit()

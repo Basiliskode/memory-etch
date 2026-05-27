@@ -46,6 +46,18 @@ def export_memory(store, path: str) -> dict:
             "FROM turn_buffer ORDER BY turn_id"
         ).fetchall()
 
+        atlas_maps = store._conn.execute(
+            "SELECT * FROM atlas_maps ORDER BY map_id"
+        ).fetchall()
+
+        atlas_regions = store._conn.execute(
+            "SELECT * FROM atlas_regions ORDER BY region_id"
+        ).fetchall()
+
+        atlas_edges = store._conn.execute(
+            "SELECT * FROM atlas_edges ORDER BY edge_id"
+        ).fetchall()
+
     exported_facts = []
     for row in facts:
         fact = dict(row)
@@ -53,11 +65,14 @@ def export_memory(store, path: str) -> dict:
         exported_facts.append(fact)
 
     data = {
-        "version": 1,
+        "version": 2,
         "facts": exported_facts,
         "sessions": [dict(r) for r in sessions],
         "relations": [dict(r) for r in relations],
         "turns": [dict(r) for r in turns],
+        "atlas_maps": [dict(r) for r in atlas_maps],
+        "atlas_regions": [dict(r) for r in atlas_regions],
+        "atlas_edges": [dict(r) for r in atlas_edges],
     }
 
     with open(path, "w", encoding="utf-8") as f:
@@ -68,6 +83,9 @@ def export_memory(store, path: str) -> dict:
         "sessions": len(data["sessions"]),
         "relations": len(data["relations"]),
         "turns": len(data["turns"]),
+        "atlas_maps": len(data["atlas_maps"]),
+        "atlas_regions": len(data["atlas_regions"]),
+        "atlas_edges": len(data["atlas_edges"]),
     }
 
 
@@ -86,7 +104,8 @@ def import_memory(store, path: str) -> dict:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    imported = {"facts": 0, "sessions": 0, "relations": 0, "turns": 0}
+    imported = {"facts": 0, "sessions": 0, "relations": 0, "turns": 0,
+                "atlas_maps": 0, "atlas_regions": 0, "atlas_edges": 0}
 
     for row in data.get("facts", []):
         store.add_fact(
@@ -146,6 +165,57 @@ def import_memory(store, path: str) -> dict:
                 ),
             )
             imported["turns"] += 1
+
+        # Atlas tables (v2 format)
+        for row in data.get("atlas_maps", []):
+            store._conn.execute(
+                """INSERT OR IGNORE INTO atlas_maps
+                   (map_id, name, description, tags, project, metadata,
+                    node_count, created_at, updated_at, deleted)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    row["map_id"], row["name"],
+                    row.get("description", ""), row.get("tags", ""),
+                    row.get("project", ""), row.get("metadata", "{}"),
+                    row.get("node_count", 0), row.get("created_at"),
+                    row.get("updated_at"), row.get("deleted", 0),
+                ),
+            )
+            imported["atlas_maps"] += 1
+
+        for row in data.get("atlas_regions", []):
+            store._conn.execute(
+                """INSERT OR IGNORE INTO atlas_regions
+                   (region_id, map_id, parent_region_id, name, description,
+                    tags, fact_count, created_at, deleted)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    row["region_id"], row["map_id"],
+                    row.get("parent_region_id"), row["name"],
+                    row.get("description", ""), row.get("tags", ""),
+                    row.get("fact_count", 0), row.get("created_at"),
+                    row.get("deleted", 0),
+                ),
+            )
+            imported["atlas_regions"] += 1
+
+        for row in data.get("atlas_edges", []):
+            store._conn.execute(
+                """INSERT OR IGNORE INTO atlas_edges
+                   (edge_id, map_id, source_type, source_id, target_type,
+                    target_id, relation_type, weight, metadata, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    row["edge_id"], row["map_id"],
+                    row["source_type"], row["source_id"],
+                    row["target_type"], row["target_id"],
+                    row.get("relation_type", "contains"),
+                    row.get("weight", 0.5),
+                    row.get("metadata", "{}"),
+                    row.get("created_at"),
+                ),
+            )
+            imported["atlas_edges"] += 1
 
         store._conn.commit()
 
