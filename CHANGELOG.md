@@ -4,19 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] — 2026-05-27
 
 ### Added
 
-- Community contribution docs, issue templates, PR template, and repository text normalization.
-
-### Changed
-
-- Renamed project from `memory-etch` to `memento` — package name, imports, config, env vars, and docs.
-
-### Fixed
-
-- Aligned runtime package version, README snippets, MCP docs, extras docs, and release validation checks with the 1.1.0 package metadata.
+- **Memento Atlas** — nueva capa estructural/source-map con `atlas_maps`, `atlas_regions`, `atlas_edges`.
+- Navegación jerárquica: `add_map`, `add_region`, `traverse_path`, `get_subtree` con CTE recursivo.
+- Búsqueda FTS5 sobre regiones de Atlas con lazy-loading de contenido.
+- Puente `atlas_fact_links`: vincula regiones de Atlas con facts existentes (bidireccional).
+- 6 herramientas MCP para Atlas: `create_map`, `read_map`, `list_maps`, `search_map`, `list_regions`, `link_fact`.
+- Acciones Hermes `atlas` en `EtchMemoryProvider.handle_tool_call`.
+- Export/import v2 con soporte completo de Atlas (v1 backward compatible).
+- Snapshots incluyen estado de Atlas.
+- 41 tests de Atlas + 5 tests E2E de dispatch Hermes; coverage `_atlas.py` 94%.
 
 ## [1.1.0]
 

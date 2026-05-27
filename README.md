@@ -20,6 +20,7 @@ Sin servicios externos, sin GPU, sin API keys.
 - [Embedding Providers](#embedding-providers)
 - [MCP Server](#mcp-server)
 - [Web Viewer](#web-viewer)
+- [Memento Atlas](#memento-atlas-v12)
 - [Benchmarks](#benchmarks)
 - [API](#api)
 - [Contribuir](#contribuir)
@@ -121,7 +122,13 @@ store = EtchStore("project.db", project="auto")
 │              │           │                            │
 │         Reciprocal Rank Fusion (RRF)                  │
 │              │                                        │
+│  Memento Atlas — navegación estructural por mapas     │
+│  (árbol, regiones, edges, búsqueda FTS5 sobre nodos)  │
+│              │                                        │
 │  EtchStore — SQLite + FTS5 + triggers automáticos     │
+│  ┌────────────────────────────────────────────────┐   │
+│  │  Facts   │  Atlas   │  Sessions  │  Relations  │   │
+│  └────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -162,7 +169,7 @@ Cada nivel es opcional, aditivo, y retrocompatible.
 
 | Feature | Descripción |
 |---|---|
-| **MCP Server** | 9 tools vía stdio (facts, search, timeline, similar, inbox review) |
+| **MCP Server** | 15 tools vía stdio (facts, atlas, search, timeline, similar, inbox review) |
 | **Structured facts** | Campos what/why/where/learned para memorias disciplinadas |
 | **Project detection** | Detecta el proyecto desde git remote automáticamente |
 | **Embedding providers** | Pluggable: NoopProvider, FastembedProvider, OllamaProvider |
@@ -216,17 +223,13 @@ set MEMENTO_DB_PATH=./memory.db
 python -m memento.mcp
 ```
 
-Herramientas MCP expuestas:
+Herramientas MCP expuestas (15 tools):
 
-- `add_fact`
-- `search_facts`
-- `get_fact`
-- `delete_fact`
-- `get_timeline`
-- `search_similar`
-- `list_inbox`
-- `promote_fact`
-- `reject_fact`
+| Grupo | Tools |
+|-------|-------|
+| **Facts** | `add_fact`, `search_facts`, `get_fact`, `delete_fact`, `get_timeline`, `search_similar` |
+| **Inbox** | `list_inbox`, `promote_fact`, `reject_fact` |
+| **Atlas** | `create_map`, `read_map`, `list_maps`, `search_map`, `list_regions`, `link_fact` |
 
 Configuración vía `MEMENTO_DB_PATH`. Si no está definida, el servidor usa `:memory:` como default; para uso persistente, seteá una ruta explícita como `./memory.db` o `~/.memento/etch.db`.
 
@@ -274,7 +277,72 @@ No new dependencies. Works with existing `add_fact` callers — provenance args 
 
 ---
 
-## Benchmark
+## Memento Atlas (v1.2)
+
+**Atlas es la capa estructural de Memento.** Mientras los facts capturan *qué* se dijo/decidió (memoria operacional atómica), Atlas captura *dónde* vive esa información — estructura de documentos, jerarquías de proyectos, mapas de conocimiento navegables.
+
+Atlas **complementa** facts, no los reemplaza. Ambos conviven en la misma DB y pueden vincularse entre sí.
+
+### Conceptos
+
+| Concepto | Descripción |
+|----------|-------------|
+| **Map** | Contenedor top-level (ej: "README Memento", "Especificación API", "Arquitectura del proyecto") |
+| **Region** | Nodo jerárquico dentro de un mapa — puede tener hijos, forma un árbol |
+| **Edge** | Relación estructurada entre regiones (contiene, importa, extiende, referencia) |
+| **Fact link** | Puente entre una región de Atlas y un fact de Memento |
+
+### Quick start
+
+```python
+from memento import EtchStore, EtchRetriever
+
+store = EtchStore("memory.db")
+retriever = EtchRetriever(store)
+
+# Crear un mapa (ej: documentación del proyecto)
+store.add_map("Memento Docs", description="Documentación técnica de Memento")
+
+# Agregar regiones jerárquicas
+store.add_region("Arquitectura", map_id=1, parent_id=None)
+store.add_region("API Reference", map_id=1, parent_id=1)  # hija de Arquitectura
+store.add_region("EtchStore", map_id=1, parent_id=2)      # sub-región
+
+# Vincular una región con un fact existente
+store.link_fact(region_id=3, fact_id=42, relationship="annotates")
+
+# Navegar el árbol
+tree = retriever.traverse_path(start_region_id=1, end_region_id=3)
+for r in tree:
+    print(f"{'  ' * r['depth']}{r['name']} — {r.get('summary', '')}")
+
+# Buscar en Atlas (FTS5 sobre nombres + summaries de regiones)
+results = retriever.search_map("arquitectura API")
+for r in results:
+    print(f"[{r['_score']:.2f}] {r['name']} ({r['kind']})")
+```
+
+### MCP Atlas tools
+
+| Tool | Propósito |
+|------|-----------|
+| `create_map(name, description, project)` | Crear un nuevo mapa |
+| `read_map(map_id)` | Obtener mapa con todas sus regiones |
+| `list_maps(project, limit)` | Listar mapas existentes |
+| `search_map(query, project, limit)` | Buscar en regiones vía FTS5 |
+| `list_regions(map_id)` | Listar regiones de un mapa |
+| `link_fact(region_id, fact_id, relationship)` | Vincular región con fact |
+
+### ¿Cuándo usar Atlas vs Facts?
+
+| Situación | Usar |
+|-----------|------|
+| "¿Qué decidimos sobre X?" | Facts (memoria operacional) |
+| "¿Dónde está documentada la función Y?" | Atlas (navegación estructural) |
+| "¿Por qué elegimos SQLite y dónde está explicado?" | Facts + Atlas (fact con link a región del README) |
+| "Mostrame la estructura del proyecto" | Atlas (árbol de regiones) |
+
+---
 
 Benchmark integrado para medir recall@k con dataset sintético y juez Gemini:
 
